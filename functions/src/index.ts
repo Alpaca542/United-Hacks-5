@@ -18,6 +18,30 @@ interface JoinGameData {
     username: string;
 }
 
+// Determine winner based on live cells
+const determineWinner = (grid: { [key: string]: number[] }): string => {
+    let player1Count = 0;
+    let player2Count = 0;
+
+    for (const rowKey in grid) {
+        const row = grid[rowKey];
+        for (const cell of row) {
+            if (cell === 1) player1Count++;
+            else if (cell === 2) player2Count++;
+        }
+    }
+
+    // Check if a player has no cells left (automatic win)
+    if (player1Count === 0 && player2Count === 0) return "tie";
+    if (player1Count === 0) return "player2";
+    if (player2Count === 0) return "player1";
+
+    // Regular winner determination based on cell count
+    if (player1Count > player2Count) return "player1";
+    if (player2Count > player1Count) return "player2";
+    return "tie";
+};
+
 export const createGame = onCall(
     {
         cors: true,
@@ -43,7 +67,7 @@ export const createGame = onCall(
                     ready: false,
                 },
                 user2: null,
-                grid: initializeGrid(50),
+                grid: initializeGrid(60),
                 createdAt: new Date(),
                 startedAt: null,
                 fightingStartedAt: null,
@@ -291,8 +315,17 @@ const runGameOfLife = (
 ): { [key: string]: number[] } => {
     let currentGrid = JSON.parse(JSON.stringify(initialGrid)); // Deep copy
     const gridSize = Object.keys(currentGrid).length;
+    const gridHistory: { [key: string]: number[] }[] = [];
 
     for (let gen = 0; gen < generations; gen++) {
+        // Check if we've reached a stable state before computing next step
+        if (hasReachedStableState(currentGrid, gridHistory, gridSize)) {
+            logger.info(
+                `Game of Life simulation stopped early at generation ${gen} due to stable state or oscillation`
+            );
+            break;
+        }
+
         const newGrid: { [key: string]: number[] } = {};
 
         for (let row = 0; row < gridSize; row++) {
@@ -338,10 +371,73 @@ const runGameOfLife = (
                 }
             }
         }
+
+        // Update grid history - keep only the last 2 grids
+        gridHistory.push(JSON.parse(JSON.stringify(currentGrid)));
+        if (gridHistory.length > 2) {
+            gridHistory.shift(); // Remove oldest grid
+        }
+
         currentGrid = newGrid;
     }
 
     return currentGrid;
+};
+
+// Function to compare two grids for equality
+const gridsAreEqual = (
+    grid1: { [key: string]: number[] },
+    grid2: { [key: string]: number[] },
+    gridSize: number
+): boolean => {
+    for (let row = 0; row < gridSize; row++) {
+        const rowKey = `row${row}`;
+        const row1 = grid1[rowKey] || [];
+        const row2 = grid2[rowKey] || [];
+
+        if (row1.length !== row2.length) return false;
+
+        for (let col = 0; col < gridSize; col++) {
+            if ((row1[col] || 0) !== (row2[col] || 0)) {
+                return false;
+            }
+        }
+    }
+    return true;
+};
+
+// Function to check if current grid matches any of the last two grids
+const hasReachedStableState = (
+    currentGrid: { [key: string]: number[] },
+    gridHistory: { [key: string]: number[] }[],
+    gridSize: number
+): boolean => {
+    if (gridHistory.length === 0) return false;
+
+    // Check if current grid matches the previous grid (stable state)
+    if (
+        gridsAreEqual(
+            currentGrid,
+            gridHistory[gridHistory.length - 1],
+            gridSize
+        )
+    ) {
+        return true;
+    }
+
+    // Check if current grid matches the grid from 2 steps ago (oscillation)
+    if (
+        gridHistory.length >= 2 &&
+        gridsAreEqual(
+            currentGrid,
+            gridHistory[gridHistory.length - 2],
+            gridSize
+        )
+    ) {
+        return true;
+    }
+
+    return false;
 };
 
 // Count living neighbors
@@ -355,17 +451,11 @@ const countNeighbors = (
     for (let i = -1; i <= 1; i++) {
         for (let j = -1; j <= 1; j++) {
             if (i === 0 && j === 0) continue;
-            const newRow = row + i;
-            const newCol = col + j;
-            if (
-                newRow >= 0 &&
-                newRow < gridSize &&
-                newCol >= 0 &&
-                newCol < gridSize
-            ) {
-                const cellValue = grid[`row${newRow}`]?.[newCol] || 0;
-                if (cellValue > 0) count++;
-            }
+            // Handle looping board
+            const newRow = (row + i + gridSize) % gridSize;
+            const newCol = (col + j + gridSize) % gridSize;
+            const cellValue = grid[`row${newRow}`]?.[newCol] || 0;
+            if (cellValue > 0) count++;
         }
     }
     return count;
@@ -383,39 +473,15 @@ const getNeighborColors = (
     for (let i = -1; i <= 1; i++) {
         for (let j = -1; j <= 1; j++) {
             if (i === 0 && j === 0) continue;
-            const newRow = row + i;
-            const newCol = col + j;
-            if (
-                newRow >= 0 &&
-                newRow < gridSize &&
-                newCol >= 0 &&
-                newCol < gridSize
-            ) {
-                const cellValue = grid[`row${newRow}`]?.[newCol] || 0;
-                if (cellValue === 1) player1++;
-                else if (cellValue === 2) player2++;
-            }
+            // Handle looping board
+            const newRow = (row + i + gridSize) % gridSize;
+            const newCol = (col + j + gridSize) % gridSize;
+            const cellValue = grid[`row${newRow}`]?.[newCol] || 0;
+            if (cellValue === 1) player1++;
+            else if (cellValue === 2) player2++;
         }
     }
     return { player1, player2 };
-};
-
-// Determine winner based on live cells
-const determineWinner = (grid: { [key: string]: number[] }): string => {
-    let player1Count = 0;
-    let player2Count = 0;
-
-    for (const rowKey in grid) {
-        const row = grid[rowKey];
-        for (const cell of row) {
-            if (cell === 1) player1Count++;
-            else if (cell === 2) player2Count++;
-        }
-    }
-
-    if (player1Count > player2Count) return "player1";
-    else if (player2Count > player1Count) return "player2";
-    else return "tie";
 };
 
 const initializeGrid = (width: number): { [key: string]: number[] } => {
