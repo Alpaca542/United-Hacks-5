@@ -1,9 +1,9 @@
 import { useState, useEffect } from "react";
-import GameCanvas from "./components/GameCanvas";
 import AuthForm from "./components/AuthForm";
 import { auth } from "./components/firebase";
 import { onAuthStateChanged, type User } from "firebase/auth";
 import { getUsernameById } from "./components/usernameHelpers";
+import CreatingGame from "./components/CreatingGame";
 
 function App() {
     const [user, setUser] = useState<User | null>(null);
@@ -42,7 +42,7 @@ function App() {
                 <div>
                     <div>Welcome, {username || user.email}!</div>
                     <button onClick={() => auth.signOut()}>Logout</button>
-                    <GameCanvas />
+                    <CreatingGame />
                 </div>
             ) : (
                 <AuthForm onAuthSuccess={handleAuthSuccess} />

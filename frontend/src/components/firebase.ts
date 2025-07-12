@@ -2,6 +2,7 @@
 import { initializeApp } from "firebase/app";
 import { getDatabase } from "firebase/database";
 import { getFirestore } from "firebase/firestore";
+import { getFunctions, connectFunctionsEmulator } from "firebase/functions";
 import { getAuth } from "firebase/auth";
 // Your web app's Firebase configuration
 // For Firebase JS SDK v7.20.0 and later, measurementId is optional
@@ -20,5 +21,10 @@ const app = initializeApp(firebaseConfig);
 const rtdb = getDatabase(app);
 const db = getFirestore(app);
 const auth = getAuth(app);
+export const functions = getFunctions(app, "us-central1");
 
+// Connect to Functions emulator in development
+if (true) {
+    connectFunctionsEmulator(functions, "localhost", 5001);
+}
 export { rtdb, db, auth };

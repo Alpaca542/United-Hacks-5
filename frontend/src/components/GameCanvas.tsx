@@ -1,93 +1,89 @@
-import React, { useEffect, useRef, useState, useCallback } from "react";
+import React, { useState, useEffect } from "react";
+
+// Constant for player editable rows
+const PLAYER_EDITABLE_ROWS = 6;
 
 interface GameCanvasProps {
-    width?: number;
-    height?: number;
-    cellSize?: number;
+    game: {
+        id: string;
+        state: string;
+        user1: { uid: string; username: string; ready: boolean } | null;
+        user2: { uid: string; username: string; ready: boolean } | null;
+        grid: { [key: string]: number[] };
+        finalGrid?: { [key: string]: number[] };
+        winner?: string;
+    };
+    currentUser: { uid: string } | null;
+    onCellClick: (row: number, col: number) => void;
+    onAnimationComplete?: () => void;
+    gridSize?: number;
 }
 
 const GameCanvas: React.FC<GameCanvasProps> = ({
-    width = 800,
-    height = 600,
-    cellSize = 10,
+    game,
+    currentUser,
+    onCellClick,
+    onAnimationComplete,
+    gridSize = 50,
 }) => {
-    const canvasRef = useRef<HTMLCanvasElement>(null);
-    const [isRunning, setIsRunning] = useState(false);
-    const [generation, setGeneration] = useState(0);
+    const [animationGrid, setAnimationGrid] = useState<{
+        [key: string]: number[];
+    } | null>(null);
+    const [animationGeneration, setAnimationGeneration] = useState(0);
+    const [isAnimating, setIsAnimating] = useState(false);
+    var MouseDown = false;
+    window.addEventListener("mousedown", () => (MouseDown = true));
+    window.addEventListener("mouseup", () => (MouseDown = false));
 
-    const cols = Math.floor(width / cellSize);
-    const rows = Math.floor(height / cellSize);
+    // Conway's Game of Life rules
+    const runGameOfLifeStep = (currentGrid: {
+        [key: string]: number[];
+    }): { [key: string]: number[] } => {
+        const newGrid: { [key: string]: number[] } = {};
 
-    // Initialize grid with hardcoded starting configuration
-    const createInitialGrid = useCallback(() => {
-        const grid = Array(rows)
-            .fill(null)
-            .map(() => Array(cols).fill(false));
+        for (let row = 0; row < gridSize; row++) {
+            newGrid[`row${row}`] = [];
+            for (let col = 0; col < gridSize; col++) {
+                const neighbors = countNeighbors(currentGrid, row, col);
+                const currentCell = currentGrid[`row${row}`]?.[col] || 0;
 
-        // Hardcoded starting configuration - Glider pattern
-        const gliderPattern = [
-            [1, 0],
-            [2, 1],
-            [0, 2],
-            [1, 2],
-            [2, 2],
-        ];
-
-        // Place glider in top-left area
-        gliderPattern.forEach(([row, col]) => {
-            if (row < rows && col < cols) {
-                grid[row + 5][col + 5] = true;
+                if (currentCell > 0) {
+                    // Cell is alive - survives with 2 or 3 neighbors
+                    newGrid[`row${row}`][col] =
+                        neighbors === 2 || neighbors === 3 ? currentCell : 0;
+                } else {
+                    // Cell is dead - becomes alive with exactly 3 neighbors
+                    if (neighbors === 3) {
+                        // Determine which player's cell should be born based on neighbors
+                        const neighborColors = getNeighborColors(
+                            currentGrid,
+                            row,
+                            col
+                        );
+                        // Use the color with more neighbors (most common)
+                        if (neighborColors.player1 > neighborColors.player2) {
+                            newGrid[`row${row}`][col] = 1;
+                        } else if (
+                            neighborColors.player2 > neighborColors.player1
+                        ) {
+                            newGrid[`row${row}`][col] = 2;
+                        } else {
+                            // Equal neighbors - default to player 1 or random choice
+                            newGrid[`row${row}`][col] =
+                                Math.random() > 0.5 ? 1 : 2;
+                        }
+                    } else {
+                        newGrid[`row${row}`][col] = 0;
+                    }
+                }
             }
-        });
+        }
 
-        // Add a blinker pattern
-        const blinkerPattern = [
-            [0, 1],
-            [1, 1],
-            [2, 1],
-        ];
+        return newGrid;
+    };
 
-        blinkerPattern.forEach(([row, col]) => {
-            if (row + 10 < rows && col + 20 < cols) {
-                grid[row + 10][col + 20] = true;
-            }
-        });
-
-        // Add a block pattern (still life)
-        const blockPattern = [
-            [0, 0],
-            [0, 1],
-            [0, 2],
-            [1, 0],
-            [1, 2],
-            [2, 0],
-            [2, 1],
-            [2, 2],
-
-            [0, 4],
-            [0, 5],
-            [0, 6],
-            [1, 4],
-            [1, 6],
-            [2, 4],
-            [2, 5],
-            [2, 6],
-        ];
-
-        blockPattern.forEach(([row, col]) => {
-            if (row + 15 < rows && col + 35 < cols) {
-                grid[row + 15][col + 35] = true;
-            }
-        });
-
-        return grid;
-    }, [rows, cols]);
-
-    const [grid, setGrid] = useState(createInitialGrid);
-
-    // Count live neighbors for a cell
     const countNeighbors = (
-        grid: boolean[][],
+        grid: { [key: string]: number[] },
         row: number,
         col: number
     ): number => {
@@ -99,175 +95,281 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
                 const newCol = col + j;
                 if (
                     newRow >= 0 &&
-                    newRow < rows &&
+                    newRow < gridSize &&
                     newCol >= 0 &&
-                    newCol < cols
+                    newCol < gridSize
                 ) {
-                    if (grid[newRow][newCol]) count++;
+                    const cellValue = grid[`row${newRow}`]?.[newCol] || 0;
+                    if (cellValue > 0) count++;
                 }
             }
         }
         return count;
     };
 
-    // Apply Conway's Game of Life rules
-    const nextGeneration = useCallback(
-        (currentGrid: boolean[][]): boolean[][] => {
-            const newGrid = Array(rows)
-                .fill(null)
-                .map(() => Array(cols).fill(false));
-
-            for (let row = 0; row < rows; row++) {
-                for (let col = 0; col < cols; col++) {
-                    const neighbors = countNeighbors(currentGrid, row, col);
-                    const isAlive = currentGrid[row][col];
-
-                    if (isAlive) {
-                        // Live cell with 2 or 3 neighbors survives
-                        newGrid[row][col] = neighbors === 2 || neighbors === 3;
-                    } else {
-                        // Dead cell with exactly 3 neighbors becomes alive
-                        newGrid[row][col] = neighbors === 3;
-                    }
+    const getNeighborColors = (
+        grid: { [key: string]: number[] },
+        row: number,
+        col: number
+    ): { player1: number; player2: number } => {
+        let player1 = 0,
+            player2 = 0;
+        for (let i = -1; i <= 1; i++) {
+            for (let j = -1; j <= 1; j++) {
+                if (i === 0 && j === 0) continue;
+                const newRow = row + i;
+                const newCol = col + j;
+                if (
+                    newRow >= 0 &&
+                    newRow < gridSize &&
+                    newCol >= 0 &&
+                    newCol < gridSize
+                ) {
+                    const cellValue = grid[`row${newRow}`]?.[newCol] || 0;
+                    if (cellValue === 1) player1++;
+                    else if (cellValue === 2) player2++;
                 }
             }
-
-            return newGrid;
-        },
-        [rows, cols]
-    );
-
-    // Draw the grid on canvas
-    const drawGrid = useCallback(
-        (grid: boolean[][]) => {
-            const canvas = canvasRef.current;
-            if (!canvas) return;
-
-            const ctx = canvas.getContext("2d");
-            if (!ctx) return;
-
-            // Clear canvas
-            ctx.fillStyle = "#f0f0f0";
-            ctx.fillRect(0, 0, width, height);
-
-            // Draw cells
-            ctx.fillStyle = "#333";
-            for (let row = 0; row < rows; row++) {
-                for (let col = 0; col < cols; col++) {
-                    if (grid[row][col]) {
-                        ctx.fillRect(
-                            col * cellSize,
-                            row * cellSize,
-                            cellSize - 1,
-                            cellSize - 1
-                        );
-                    }
-                }
-            }
-
-            // Draw grid lines
-            ctx.strokeStyle = "#ddd";
-            ctx.lineWidth = 1;
-
-            // Vertical lines
-            for (let col = 0; col <= cols; col++) {
-                ctx.beginPath();
-                ctx.moveTo(col * cellSize, 0);
-                ctx.lineTo(col * cellSize, height);
-                ctx.stroke();
-            }
-
-            // Horizontal lines
-            for (let row = 0; row <= rows; row++) {
-                ctx.beginPath();
-                ctx.moveTo(0, row * cellSize);
-                ctx.lineTo(width, row * cellSize);
-                ctx.stroke();
-            }
-        },
-        [width, height, cellSize, rows, cols]
-    );
-
-    // Game loop
-    const gameLoop = useCallback(() => {
-        setGrid((currentGrid) => {
-            const newGrid = nextGeneration(currentGrid);
-            setGeneration((gen) => gen + 1);
-            return newGrid;
-        });
-    }, [nextGeneration]);
-
-    // Start/stop the game
-    const toggleGame = () => {
-        setIsRunning(!isRunning);
-    };
-
-    // Reset the game
-    const resetGame = () => {
-        setIsRunning(false);
-        setGeneration(0);
-        setGrid(createInitialGrid());
-    };
-
-    // Animation loop
-    useEffect(() => {
-        if (isRunning) {
-            const interval = setInterval(gameLoop, 20); // Update every 200ms
-            return () => clearInterval(interval);
         }
-    }, [isRunning, gameLoop]);
+        return { player1, player2 };
+    };
 
-    // Draw the grid when it changes
+    // Start animation when game enters fighting state
     useEffect(() => {
-        drawGrid(grid);
-    }, [grid, drawGrid]);
+        if (
+            game.state === "fighting" &&
+            !isAnimating &&
+            animationGeneration < 10
+        ) {
+            setIsAnimating(true);
+            setAnimationGrid(JSON.parse(JSON.stringify(game.grid))); // Deep copy
+            setAnimationGeneration(0);
+        }
+    }, [game.state, isAnimating, game.grid]);
+
+    // Run animation steps
+    useEffect(() => {
+        if (isAnimating && animationGrid && animationGeneration < 1000) {
+            const timer = setTimeout(() => {
+                const nextGrid = runGameOfLifeStep(animationGrid);
+                setAnimationGrid(nextGrid);
+                setAnimationGeneration((prev) => prev + 1);
+            }, 50); // 50ms between generations for smooth animation
+
+            return () => clearTimeout(timer);
+        } else if (isAnimating && animationGeneration >= 1000) {
+            setIsAnimating(false);
+            if (onAnimationComplete) {
+                onAnimationComplete();
+            }
+        }
+    }, [isAnimating, animationGrid, animationGeneration, onAnimationComplete]);
+
+    // Determine player number
+    const getPlayerNumber = (): number => {
+        if (!currentUser) return 0;
+        if (game.user1?.uid === currentUser.uid) return 1;
+        if (game.user2?.uid === currentUser.uid) return 2;
+        return 0;
+    };
+
+    const playerNumber = getPlayerNumber();
+
+    // Handle cell click
+    const handleCellClick = (row: number, col: number) => {
+        if (playerNumber === 0) return; // Not a player in this game
+
+        // Check if player can edit this row
+        const canEdit =
+            (playerNumber === 1 && row < PLAYER_EDITABLE_ROWS) ||
+            (playerNumber === 2 && row >= gridSize - PLAYER_EDITABLE_ROWS);
+
+        if (!canEdit) return; // Player cannot edit this row
+
+        onCellClick(row, col);
+    };
+
+    // Get cell value from grid (use animation grid if animating)
+    const getCellValue = (row: number, col: number): number => {
+        const currentGrid =
+            isAnimating && animationGrid ? animationGrid : game.grid;
+        const rowData = currentGrid[`row${row}`];
+        return rowData ? rowData[col] || 0 : 0;
+    };
+
+    // Disable cell editing during animation or when game is not in waiting/started state
+    const canEditGrid = game.state === "waiting" || game.state === "started";
+
+    // Render the grid
+    const renderGrid = () => {
+        const rows = [];
+        for (let row = 0; row < gridSize; row++) {
+            const cols = [];
+            for (let col = 0; col < gridSize; col++) {
+                const cellValue = getCellValue(row, col);
+
+                // Check if current player can edit this row
+                const canPlayerEdit =
+                    canEditGrid &&
+                    ((playerNumber === 1 && row < PLAYER_EDITABLE_ROWS) ||
+                        (playerNumber === 2 &&
+                            row >= gridSize - PLAYER_EDITABLE_ROWS));
+
+                // Determine background color
+                let backgroundColor = "#fff";
+                if (cellValue === 1) {
+                    backgroundColor = "#ffcccc";
+                } else if (cellValue === 2) {
+                    backgroundColor = "#ccccff";
+                } else if (canPlayerEdit) {
+                    // Highlight editable area for current player
+                    backgroundColor =
+                        playerNumber === 1 ? "#fff5f5" : "#f5f5ff";
+                } else {
+                    // Neutral area or other player's area
+                    backgroundColor = "#f9f9f9";
+                }
+
+                cols.push(
+                    <div
+                        key={`${row}-${col}`}
+                        className="grid-cell"
+                        onMouseEnter={() => {
+                            if (MouseDown) {
+                                handleCellClick(row, col);
+                            }
+                        }}
+                        onClick={() => {
+                            handleCellClick(row, col);
+                        }}
+                        style={{
+                            width: "20px",
+                            height: "20px",
+                            border: "1px solid #ccc",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            cursor: canPlayerEdit ? "pointer" : "not-allowed",
+                            fontSize: "12px",
+                            backgroundColor,
+                        }}
+                    >
+                        {cellValue !== 0 ? cellValue : ""}
+                    </div>
+                );
+            }
+            rows.push(
+                <div key={row} className="grid-row" style={{ display: "flex" }}>
+                    {cols}
+                </div>
+            );
+        }
+        return rows;
+    };
 
     return (
-        <div style={{ textAlign: "center", padding: "20px" }}>
-            <h2>Conway's Game of Life</h2>
-            <div style={{ marginBottom: "20px" }}>
-                <button
-                    onClick={toggleGame}
-                    style={{
-                        padding: "10px 20px",
-                        fontSize: "16px",
-                        marginRight: "10px",
-                        backgroundColor: isRunning ? "#ff4444" : "#44ff44",
-                        color: "white",
-                        border: "none",
-                        borderRadius: "5px",
-                        cursor: "pointer",
-                    }}
-                >
-                    {isRunning ? "Stop" : "Start"}
-                </button>
-                <button
-                    onClick={resetGame}
-                    style={{
-                        padding: "10px 20px",
-                        fontSize: "16px",
-                        backgroundColor: "#4444ff",
-                        color: "white",
-                        border: "none",
-                        borderRadius: "5px",
-                        cursor: "pointer",
-                    }}
-                >
-                    Reset
-                </button>
+        <div className="game-canvas">
+            <div className="player-info" style={{ marginBottom: "10px" }}>
+                <p>You are Player {playerNumber}</p>
+                {canEditGrid && (
+                    <>
+                        <p>
+                            You can edit rows{" "}
+                            {playerNumber === 1
+                                ? `0-${PLAYER_EDITABLE_ROWS - 1}`
+                                : `${gridSize - PLAYER_EDITABLE_ROWS}-${
+                                      gridSize - 1
+                                  }`}
+                        </p>
+                        <p>Click cells in your area to place your number</p>
+                    </>
+                )}
+                {isAnimating && (
+                    <div className="animation-status">
+                        <p>
+                            <strong>Conway's Game of Life Simulation</strong>
+                        </p>
+                        <p>Generation: {animationGeneration} / 1000</p>
+                        <div
+                            className="progress-bar"
+                            style={{
+                                width: "200px",
+                                height: "10px",
+                                backgroundColor: "#ddd",
+                                borderRadius: "5px",
+                                overflow: "hidden",
+                            }}
+                        >
+                            <div
+                                className="progress-fill"
+                                style={{
+                                    width: `${
+                                        (animationGeneration / 1000) * 100
+                                    }%`,
+                                    height: "100%",
+                                    backgroundColor: "#4CAF50",
+                                    transition: "width 0.1s ease",
+                                }}
+                            />
+                        </div>
+                    </div>
+                )}
+                {game.state === "fighting" && !isAnimating && game.winner && (
+                    <div className="winner-announcement">
+                        <h3>🏆 Battle Complete! 🏆</h3>
+                        {game.winner === "tie" ? (
+                            <div>
+                                <p>
+                                    <strong>It's a tie!</strong>
+                                </p>
+                                <p>Both players have equal cell counts.</p>
+                                <p>
+                                    🤝 Great game, {game.user1?.username} and{" "}
+                                    {game.user2?.username}! 🤝
+                                </p>
+                            </div>
+                        ) : (
+                            <div>
+                                <p>
+                                    <strong>
+                                        Player{" "}
+                                        {game.winner === "player1" ? "1" : "2"}{" "}
+                                        wins!
+                                    </strong>
+                                </p>
+                                {game.winner === "player1" && game.user1 && (
+                                    <p>
+                                        🎉 Congratulations {game.user1.username}
+                                        ! 🎉
+                                    </p>
+                                )}
+                                {game.winner === "player2" && game.user2 && (
+                                    <p>
+                                        🎉 Congratulations {game.user2.username}
+                                        ! 🎉
+                                    </p>
+                                )}
+                                <p>
+                                    🏆 Victory achieved through superior
+                                    strategy! 🏆
+                                </p>
+                            </div>
+                        )}
+                    </div>
+                )}
+                {game.state === "fighting" && !isAnimating && !game.winner && (
+                    <div className="winner-announcement">
+                        <h3>⚔️ Battle Processing... ⚔️</h3>
+                        <p>Server is calculating the final results...</p>
+                    </div>
+                )}
             </div>
-            <div style={{ marginBottom: "10px" }}>
-                <strong>Generation: {generation}</strong>
+            <div
+                className="grid-container"
+                style={{ display: "inline-block", border: "2px solid #333" }}
+            >
+                {renderGrid()}
             </div>
-            <canvas
-                ref={canvasRef}
-                width={width}
-                height={height}
-                style={{
-                    border: "2px solid #333",
-                    backgroundColor: "#f0f0f0",
-                }}
-            />
         </div>
     );
 };
