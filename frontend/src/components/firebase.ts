@@ -24,7 +24,6 @@ const auth = getAuth(app);
 export const functions = getFunctions(app, "us-central1");
 
 // Connect to Functions emulator in development
-if (true) {
-    connectFunctionsEmulator(functions, "localhost", 5001);
-}
+connectFunctionsEmulator(functions, "localhost", 5001);
+
 export { rtdb, db, auth };

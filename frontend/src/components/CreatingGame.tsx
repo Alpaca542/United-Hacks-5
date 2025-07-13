@@ -15,6 +15,7 @@ import {
     createGame as createGameFunction,
     joinGame as joinGameFunction,
     scheduleGameTransition,
+    startFightingPhase,
 } from "./CloudFunctions";
 import type { User } from "firebase/auth";
 import GameWithShapes from "./GameWithShapes";
@@ -23,6 +24,7 @@ interface GameUser {
     uid: string;
     username: string;
     ready: boolean;
+    readyForFight?: boolean;
 }
 
 interface Game {
@@ -201,6 +203,8 @@ const CreatingGame: React.FC = () => {
                 state: "waiting",
                 "user1.ready": false,
                 "user2.ready": false,
+                "user1.readyForFight": false,
+                "user2.readyForFight": false,
                 grid: initializeGrid(60),
                 startedAt: null,
                 fightingStartedAt: null,
@@ -260,6 +264,91 @@ const CreatingGame: React.FC = () => {
             });
         } catch (error) {
             console.error("Error updating grid:", error);
+        }
+    };
+
+    // Handle clear player cells
+    const handleClearPlayerCells = async () => {
+        if (!gameId || !currentUser || !game) return;
+
+        // Determine player number
+        const playerNumber =
+            game.user1?.uid === currentUser.uid
+                ? 1
+                : game.user2?.uid === currentUser.uid
+                ? 2
+                : 0;
+
+        if (playerNumber === 0) return;
+
+        const gameRef = doc(db, "games", gameId);
+        try {
+            // Get current grid and clear only the player's cells
+            const currentGrid = { ...game.grid };
+            const PLAYER_EDITABLE_ROWS = 18;
+            const gridSize = 60;
+
+            // Clear cells in player's editable area
+            for (let row = 0; row < gridSize; row++) {
+                // Check if row is in player's editable area
+                const canEditRow =
+                    (playerNumber === 1 && row < PLAYER_EDITABLE_ROWS) ||
+                    (playerNumber === 2 &&
+                        row >= gridSize - PLAYER_EDITABLE_ROWS);
+
+                if (canEditRow && currentGrid[`row${row}`]) {
+                    for (let col = 0; col < gridSize; col++) {
+                        // Only clear cells that belong to the current player
+                        if (currentGrid[`row${row}`][col] === playerNumber) {
+                            currentGrid[`row${row}`][col] = 0;
+                        }
+                    }
+                }
+            }
+
+            await updateDoc(gameRef, {
+                grid: currentGrid,
+            });
+        } catch (error) {
+            console.error("Error clearing player cells:", error);
+        }
+    };
+
+    // Handle toggle ready for fight
+    const handleToggleReadyForFight = async () => {
+        if (!gameId || !currentUser || !game || game.state !== "started")
+            return;
+
+        const gameRef = doc(db, "games", gameId);
+        const isUser1 = game.user1?.uid === currentUser.uid;
+        const fieldToUpdate = isUser1
+            ? "user1.readyForFight"
+            : "user2.readyForFight";
+        const currentReadyState = isUser1
+            ? game.user1?.readyForFight
+            : game.user2?.readyForFight;
+
+        try {
+            await updateDoc(gameRef, {
+                [fieldToUpdate]: !currentReadyState,
+            });
+
+            // Check if both players are now ready for fight
+            const otherPlayerReady = isUser1
+                ? game.user2?.readyForFight
+                : game.user1?.readyForFight;
+            const currentPlayerWillBeReady = !currentReadyState;
+
+            if (otherPlayerReady && currentPlayerWillBeReady) {
+                // Both players are ready, start the fight by calling the cloud function
+                try {
+                    await startFightingPhase(gameId);
+                } catch (error) {
+                    console.error("Error starting fighting phase:", error);
+                }
+            }
+        } catch (error) {
+            console.error("Error toggling ready for fight:", error);
         }
     };
 
@@ -332,13 +421,15 @@ const CreatingGame: React.FC = () => {
 
     // Timer for countdown during started state (client-side display only)
     useEffect(() => {
+        let timer: NodeJS.Timeout;
+
         if (game?.state === "started" && game.startedAt) {
             const startTime = game.startedAt.toDate
                 ? game.startedAt.toDate()
                 : new Date(game.startedAt);
             const endTime = new Date(startTime.getTime() + 2 * 60 * 1000); // 2 minutes
 
-            const timer = setInterval(() => {
+            timer = setInterval(() => {
                 const now = new Date();
                 const remaining = Math.max(
                     0,
@@ -354,10 +445,31 @@ const CreatingGame: React.FC = () => {
                     );
                 }
             }, 1000);
-
-            return () => clearInterval(timer);
         }
+
+        // Clean up timer when component unmounts or game state changes
+        return () => {
+            if (timer) {
+                clearInterval(timer);
+            }
+        };
     }, [game?.state, game?.startedAt]);
+
+    // Monitor for both players ready for fight to start battle early
+    useEffect(() => {
+        if (
+            game?.state === "started" &&
+            game.user1?.readyForFight &&
+            game.user2?.readyForFight
+        ) {
+            // Both players are ready, the fight should start automatically
+            // The handleToggleReadyForFight function already handles this,
+            // but this effect ensures the UI is responsive
+            console.log(
+                "Both players ready for fight - battle should start soon"
+            );
+        }
+    }, [game?.state, game?.user1?.readyForFight, game?.user2?.readyForFight]);
 
     // Listen to game updates
     useEffect(() => {
@@ -430,32 +542,39 @@ const CreatingGame: React.FC = () => {
         const seconds = timeRemaining % 60;
 
         return (
-            <div className="bg-gray-800 rounded-xl shadow-2xl p-8 border border-cyan-500/30">
-                <h2 className="text-3xl font-bold text-center mb-6 text-cyan-400 glow-text">
-                    🎮 Game Started! 🎮
-                </h2>
-                <div className="bg-gray-900 p-6 rounded-lg mb-6 border border-cyan-500/20">
-                    <p className="text-center text-cyan-300 mb-4 text-lg">
-                        Players: {game.user1?.username} vs{" "}
-                        {game.user2?.username}
-                    </p>
-                    <div className="text-center mb-6">
-                        <h3 className="text-2xl font-bold text-cyan-400 mb-3 glow-text">
-                            ⏰ Time Remaining: {minutes}:
-                            {seconds.toString().padStart(2, "0")}
-                        </h3>
-                        <p className="text-gray-400">
-                            Prepare your strategy! The battle begins
-                            automatically when the timer reaches zero.
-                        </p>
-                    </div>
-                    <div className="text-center">
-                        <button
-                            onClick={abortGame}
-                            className="py-3 px-6 bg-gradient-to-r from-red-600 to-pink-600 text-white font-medium rounded-lg hover:from-red-500 hover:to-pink-500 focus:outline-none focus:ring-2 focus:ring-red-400 focus:ring-offset-2 focus:ring-offset-gray-800 transition-all duration-300 transform hover:scale-105 shadow-lg shadow-red-500/25"
-                        >
-                            Abort Game
-                        </button>
+            <div className="bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 rounded-2xl shadow-2xl p-8 border-2 border-slate-700/50 backdrop-blur-sm">
+                <div className="text-center mb-8">
+                    <h2 className="text-4xl font-bold text-transparent bg-gradient-to-r from-cyan-400 to-blue-400 bg-clip-text mb-4">
+                        🎮 Battle Arena Active 🎮
+                    </h2>
+                    <div className="bg-slate-800/60 backdrop-blur-sm rounded-xl p-6 border border-slate-600/40">
+                        <div className="flex justify-center items-center gap-4 mb-4">
+                            <div className="text-cyan-300 font-semibold">
+                                {game.user1?.username}
+                            </div>
+                            <div className="text-2xl text-slate-400">VS</div>
+                            <div className="text-cyan-300 font-semibold">
+                                {game.user2?.username}
+                            </div>
+                        </div>
+                        <div className="text-center mb-4">
+                            <div className="text-3xl font-bold text-transparent bg-gradient-to-r from-amber-400 to-orange-400 bg-clip-text mb-2">
+                                ⏰ {minutes}:
+                                {seconds.toString().padStart(2, "0")}
+                            </div>
+                            <p className="text-slate-400 text-sm">
+                                Prepare your strategy! Battle begins
+                                automatically when timer reaches zero.
+                            </p>
+                        </div>
+                        <div className="flex justify-center">
+                            <button
+                                onClick={abortGame}
+                                className="px-6 py-3 bg-gradient-to-r from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 text-white font-semibold rounded-lg transition-all duration-300 transform hover:scale-105 shadow-lg shadow-red-500/25"
+                            >
+                                Abort Game
+                            </button>
+                        </div>
                     </div>
                 </div>
                 <GameWithShapes
@@ -463,6 +582,8 @@ const CreatingGame: React.FC = () => {
                     currentUser={currentUser}
                     onCellClick={handleCellClick}
                     onShapeDrop={handleShapeDrop}
+                    onClearPlayerCells={handleClearPlayerCells}
+                    onToggleReadyForFight={handleToggleReadyForFight}
                     gridSize={60}
                 />
             </div>
@@ -472,30 +593,37 @@ const CreatingGame: React.FC = () => {
     // If game is fighting, show the fighting state
     if (game?.state === "fighting") {
         return (
-            <div className="bg-gray-800 rounded-xl shadow-2xl p-8 border border-cyan-500/30">
-                <h2 className="text-3xl font-bold text-center mb-6 text-cyan-400 glow-text">
-                    ⚔️ Battle in Progress! ⚔️
-                </h2>
-                <div className="bg-gray-900 p-6 rounded-lg mb-6 border border-cyan-500/20">
-                    <p className="text-center text-cyan-300 mb-6 text-lg">
-                        Players: {game.user1?.username} vs{" "}
-                        {game.user2?.username}
-                    </p>
-                    <div className="flex justify-center space-x-4">
-                        {animationComplete && (
+            <div className="bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 rounded-2xl shadow-2xl p-8 border-2 border-slate-700/50 backdrop-blur-sm">
+                <div className="text-center mb-8">
+                    <h2 className="text-4xl font-bold text-transparent bg-gradient-to-r from-red-400 to-orange-400 bg-clip-text mb-4">
+                        ⚔️ Battle in Progress ⚔️
+                    </h2>
+                    <div className="bg-slate-800/60 backdrop-blur-sm rounded-xl p-6 border border-slate-600/40">
+                        <div className="flex justify-center items-center gap-4 mb-6">
+                            <div className="text-cyan-300 font-semibold">
+                                {game.user1?.username}
+                            </div>
+                            <div className="text-2xl text-slate-400">VS</div>
+                            <div className="text-cyan-300 font-semibold">
+                                {game.user2?.username}
+                            </div>
+                        </div>
+                        <div className="flex justify-center gap-4">
+                            {animationComplete && (
+                                <button
+                                    onClick={restartGame}
+                                    className="px-6 py-3 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-semibold rounded-lg transition-all duration-300 transform hover:scale-105 shadow-lg shadow-cyan-500/25"
+                                >
+                                    🔄 Restart Game
+                                </button>
+                            )}
                             <button
-                                onClick={restartGame}
-                                className="py-3 px-6 bg-gradient-to-r from-cyan-600 to-blue-600 text-white font-medium rounded-lg hover:from-cyan-500 hover:to-blue-500 focus:outline-none focus:ring-2 focus:ring-cyan-400 focus:ring-offset-2 focus:ring-offset-gray-800 transition-all duration-300 transform hover:scale-105 shadow-lg shadow-cyan-500/25"
+                                onClick={abortGame}
+                                className="px-6 py-3 bg-gradient-to-r from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 text-white font-semibold rounded-lg transition-all duration-300 transform hover:scale-105 shadow-lg shadow-red-500/25"
                             >
-                                🔄 Restart Game
+                                Abort Game
                             </button>
-                        )}
-                        <button
-                            onClick={abortGame}
-                            className="py-3 px-6 bg-gradient-to-r from-red-600 to-pink-600 text-white font-medium rounded-lg hover:from-red-500 hover:to-pink-500 focus:outline-none focus:ring-2 focus:ring-red-400 focus:ring-offset-2 focus:ring-offset-gray-800 transition-all duration-300 transform hover:scale-105 shadow-lg shadow-red-500/25"
-                        >
-                            Abort Game
-                        </button>
+                        </div>
                     </div>
                 </div>
                 <GameCanvas
@@ -503,6 +631,8 @@ const CreatingGame: React.FC = () => {
                     currentUser={currentUser}
                     onCellClick={handleCellClick}
                     onAnimationComplete={handleAnimationComplete}
+                    onClearPlayerCells={handleClearPlayerCells}
+                    onToggleReadyForFight={handleToggleReadyForFight}
                     gridSize={60}
                 />
             </div>
@@ -510,42 +640,69 @@ const CreatingGame: React.FC = () => {
     }
 
     return (
-        <div className="bg-gray-800 rounded-xl shadow-2xl p-8 border border-cyan-500/30">
+        <div className="bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 rounded-2xl shadow-2xl p-8 border-2 border-slate-700/50 backdrop-blur-sm">
             {isLoading ? (
-                <div className="text-center py-8">
-                    <h2 className="text-xl font-semibold text-cyan-400 animate-pulse">
+                <div className="text-center py-12">
+                    <div className="animate-spin rounded-full h-12 w-12 border-4 border-cyan-400 border-t-transparent mx-auto mb-4"></div>
+                    <h2 className="text-xl font-semibold text-cyan-400">
                         Loading...
                     </h2>
                 </div>
             ) : (
                 <>
-                    <h2 className="text-3xl font-bold text-center mb-8 text-cyan-400 glow-text">
-                        Create or Join Game
-                    </h2>
+                    <div className="text-center mb-8">
+                        <h2 className="text-4xl font-bold text-transparent bg-gradient-to-r from-cyan-400 to-blue-400 bg-clip-text mb-2">
+                            Game Arena
+                        </h2>
+                        <p className="text-slate-400">
+                            Create or join a Conway's Game of Life battle
+                        </p>
+                    </div>
 
                     {!gameId ? (
-                        <div className="space-y-6">
-                            <div className="bg-gray-900 p-6 rounded-lg border border-cyan-500/20">
-                                <h3 className="text-xl font-semibold mb-4 text-cyan-300">
+                        <div className="grid md:grid-cols-2 gap-6">
+                            <div className="bg-slate-800/60 backdrop-blur-sm p-6 rounded-xl border border-slate-600/40">
+                                <h3 className="text-2xl font-bold text-cyan-300 mb-6 text-center">
                                     Create New Game
                                 </h3>
+                                <div className="text-center mb-6">
+                                    <div className="text-6xl mb-4">🎮</div>
+                                    <p className="text-slate-400 text-sm">
+                                        Start a new battle arena and invite a
+                                        friend
+                                    </p>
+                                </div>
                                 <button
                                     onClick={createGame}
                                     disabled={isCreating || !currentUser}
-                                    className="w-full py-3 px-6 bg-gradient-to-r from-cyan-600 to-blue-600 text-white font-medium rounded-lg hover:from-cyan-500 hover:to-blue-500 focus:outline-none focus:ring-2 focus:ring-cyan-400 focus:ring-offset-2 focus:ring-offset-gray-900 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-300 transform hover:scale-105 shadow-lg shadow-cyan-500/25"
+                                    className="w-full py-4 px-6 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-semibold rounded-lg transition-all duration-300 transform hover:scale-105 shadow-lg shadow-cyan-500/25 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
                                 >
-                                    {isCreating ? "Creating..." : "Create Game"}
+                                    {isCreating ? (
+                                        <div className="flex items-center justify-center gap-2">
+                                            <div className="animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent"></div>
+                                            Creating...
+                                        </div>
+                                    ) : (
+                                        "Create Game"
+                                    )}
                                 </button>
                             </div>
 
-                            <div className="bg-gray-900 p-6 rounded-lg border border-cyan-500/20">
-                                <h3 className="text-xl font-semibold mb-4 text-cyan-300">
+                            <div className="bg-slate-800/60 backdrop-blur-sm p-6 rounded-xl border border-slate-600/40">
+                                <h3 className="text-2xl font-bold text-green-300 mb-6 text-center">
                                     Join Existing Game
                                 </h3>
+                                <div className="text-center mb-6">
+                                    <div className="text-6xl mb-4">🤝</div>
+                                    <p className="text-slate-400 text-sm">
+                                        Enter a Game ID to join an existing
+                                        battle
+                                    </p>
+                                </div>
                                 <input
                                     type="text"
                                     placeholder="Enter Game ID"
-                                    className="w-full px-4 py-3 bg-gray-800 border border-cyan-500/50 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-400 focus:border-cyan-400 text-white placeholder-gray-400 mb-4 transition-all duration-300 hover:shadow-lg hover:shadow-cyan-500/20"
+                                    className="w-full px-4 py-3 bg-slate-700/60 border border-slate-600/50 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-400 focus:border-green-400 text-white placeholder-slate-400 mb-4 transition-all duration-300 backdrop-blur-sm"
                                     onKeyDown={(e) => {
                                         if (e.key === "Enter") {
                                             const gameIdToJoin = (
@@ -569,76 +726,94 @@ const CreatingGame: React.FC = () => {
                                         }
                                     }}
                                     disabled={!currentUser}
-                                    className="w-full py-3 px-6 bg-gradient-to-r from-green-600 to-teal-600 text-white font-medium rounded-lg hover:from-green-500 hover:to-teal-500 focus:outline-none focus:ring-2 focus:ring-green-400 focus:ring-offset-2 focus:ring-offset-gray-900 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-300 transform hover:scale-105 shadow-lg shadow-green-500/25"
+                                    className="w-full py-4 px-6 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 text-white font-semibold rounded-lg transition-all duration-300 transform hover:scale-105 shadow-lg shadow-green-500/25 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
                                 >
                                     Join Game
                                 </button>
                             </div>
                         </div>
                     ) : (
-                        <div className="bg-gray-900 p-6 rounded-lg border border-cyan-500/20">
-                            <h3 className="text-2xl font-semibold mb-4 text-cyan-400 glow-text">
-                                Game Lobby
-                            </h3>
-                            <p className="mb-6 text-cyan-300">
-                                <strong>Game ID:</strong>{" "}
-                                <span className="text-cyan-400 font-mono">
-                                    {gameId}
-                                </span>
-                            </p>
-
-                            <div className="mb-6">
-                                <h4 className="text-lg font-medium mb-4 text-cyan-300">
-                                    Players:
-                                </h4>
-                                <div className="space-y-3">
-                                    <div className="flex justify-between items-center bg-gray-800 p-4 rounded-lg border border-cyan-500/30">
-                                        <span className="font-medium text-cyan-300">
-                                            {game?.user1?.username ||
-                                                "Player 1"}
-                                        </span>
-                                        <span
-                                            className={`px-3 py-1 rounded-full text-sm font-medium ${
-                                                game?.user1?.ready
-                                                    ? "bg-green-500/20 text-green-400 border border-green-500/50"
-                                                    : "bg-gray-700 text-gray-400 border border-gray-600"
-                                            }`}
-                                        >
-                                            {game?.user1?.ready
-                                                ? "✓ Ready"
-                                                : "○ Not Ready"}
-                                        </span>
+                        <div className="bg-slate-800/60 backdrop-blur-sm p-8 rounded-xl border border-slate-600/40">
+                            <div className="text-center mb-8">
+                                <h3 className="text-3xl font-bold text-cyan-300 mb-4">
+                                    Game Lobby
+                                </h3>
+                                <div className="bg-slate-700/60 rounded-lg p-4 border border-slate-600/40">
+                                    <p className="text-slate-300 mb-2">
+                                        Game ID:
+                                    </p>
+                                    <div className="text-2xl font-mono text-cyan-400 tracking-wider">
+                                        {gameId}
                                     </div>
-                                    <div className="flex justify-between items-center bg-gray-800 p-4 rounded-lg border border-cyan-500/30">
-                                        <span className="font-medium text-cyan-300">
-                                            {game?.user2?.username ||
-                                                "Waiting for Player 2..."}
-                                        </span>
-                                        {game?.user2 && (
-                                            <span
-                                                className={`px-3 py-1 rounded-full text-sm font-medium ${
-                                                    game?.user2?.ready
-                                                        ? "bg-green-500/20 text-green-400 border border-green-500/50"
-                                                        : "bg-gray-700 text-gray-400 border border-gray-600"
+                                </div>
+                            </div>
+
+                            <div className="mb-8">
+                                <h4 className="text-xl font-semibold text-slate-300 mb-6 text-center">
+                                    Players
+                                </h4>
+                                <div className="grid gap-4">
+                                    <div className="bg-slate-700/60 backdrop-blur-sm p-6 rounded-xl border border-slate-600/40">
+                                        <div className="flex justify-between items-center">
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-10 h-10 bg-gradient-to-r from-blue-500 to-blue-600 rounded-full flex items-center justify-center text-white font-bold">
+                                                    1
+                                                </div>
+                                                <span className="font-semibold text-slate-200">
+                                                    {game?.user1?.username ||
+                                                        "Player 1"}
+                                                </span>
+                                            </div>
+                                            <div
+                                                className={`px-4 py-2 rounded-full text-sm font-semibold transition-all duration-300 ${
+                                                    game?.user1?.ready
+                                                        ? "bg-green-500/20 text-green-400 border-2 border-green-500/50 shadow-lg shadow-green-500/20"
+                                                        : "bg-slate-600/60 text-slate-400 border-2 border-slate-500/50"
                                                 }`}
                                             >
-                                                {game?.user2?.ready
+                                                {game?.user1?.ready
                                                     ? "✓ Ready"
                                                     : "○ Not Ready"}
-                                            </span>
-                                        )}
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className="bg-slate-700/60 backdrop-blur-sm p-6 rounded-xl border border-slate-600/40">
+                                        <div className="flex justify-between items-center">
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-10 h-10 bg-gradient-to-r from-red-500 to-red-600 rounded-full flex items-center justify-center text-white font-bold">
+                                                    2
+                                                </div>
+                                                <span className="font-semibold text-slate-200">
+                                                    {game?.user2?.username ||
+                                                        "Waiting for Player 2..."}
+                                                </span>
+                                            </div>
+                                            {game?.user2 && (
+                                                <div
+                                                    className={`px-4 py-2 rounded-full text-sm font-semibold transition-all duration-300 ${
+                                                        game?.user2?.ready
+                                                            ? "bg-green-500/20 text-green-400 border-2 border-green-500/50 shadow-lg shadow-green-500/20"
+                                                            : "bg-slate-600/60 text-slate-400 border-2 border-slate-500/50"
+                                                    }`}
+                                                >
+                                                    {game?.user2?.ready
+                                                        ? "✓ Ready"
+                                                        : "○ Not Ready"}
+                                                </div>
+                                            )}
+                                        </div>
                                     </div>
                                 </div>
                             </div>
 
                             {game?.user2 && (
-                                <div className="mb-6">
+                                <div className="mb-8">
                                     <button
                                         onClick={toggleReady}
-                                        className={`w-full py-3 px-6 font-medium rounded-lg focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-900 transition-all duration-300 transform hover:scale-105 ${
+                                        className={`w-full py-4 px-6 font-semibold rounded-lg transition-all duration-300 transform hover:scale-105 shadow-lg ${
                                             currentUserReady
-                                                ? "bg-gradient-to-r from-yellow-600 to-orange-600 text-white hover:from-yellow-500 hover:to-orange-500 focus:ring-yellow-400 shadow-lg shadow-yellow-500/25"
-                                                : "bg-gradient-to-r from-green-600 to-teal-600 text-white hover:from-green-500 hover:to-teal-500 focus:ring-green-400 shadow-lg shadow-green-500/25"
+                                                ? "bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 text-white shadow-amber-500/25"
+                                                : "bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 text-white shadow-green-500/25"
                                         }`}
                                     >
                                         {currentUserReady
@@ -648,31 +823,49 @@ const CreatingGame: React.FC = () => {
 
                                     {game?.user1?.ready &&
                                         game?.user2?.ready && (
-                                            <p className="text-center text-cyan-400 font-medium mt-4 animate-pulse glow-text">
-                                                Starting game...
-                                            </p>
+                                            <div className="mt-6 text-center">
+                                                <div className="bg-green-500/20 rounded-lg p-4 border border-green-500/50">
+                                                    <div className="flex items-center justify-center gap-2">
+                                                        <div className="animate-spin rounded-full h-5 w-5 border-2 border-green-400 border-t-transparent"></div>
+                                                        <p className="text-green-400 font-semibold">
+                                                            Starting game...
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                            </div>
                                         )}
                                 </div>
                             )}
 
                             {waitingForPlayer && !game?.user2 && (
-                                <div className="mb-6 bg-cyan-900/20 p-4 rounded-lg border border-cyan-500/30">
-                                    <p className="text-cyan-300 mb-2">
-                                        Waiting for another player to join...
-                                    </p>
-                                    <p className="text-cyan-400">
-                                        Share this Game ID with your friend:{" "}
-                                        <strong className="font-mono text-cyan-300">
-                                            {gameId}
-                                        </strong>
-                                    </p>
+                                <div className="mb-8">
+                                    <div className="bg-cyan-500/20 rounded-lg p-6 border border-cyan-500/50">
+                                        <div className="text-center">
+                                            <div className="text-4xl mb-3">
+                                                ⏳
+                                            </div>
+                                            <p className="text-cyan-300 font-semibold mb-2">
+                                                Waiting for another player to
+                                                join...
+                                            </p>
+                                            <p className="text-cyan-400 text-sm">
+                                                Share this Game ID with your
+                                                friend:
+                                            </p>
+                                            <div className="mt-3 p-3 bg-cyan-900/30 rounded-lg">
+                                                <div className="text-xl font-mono text-cyan-300 tracking-wider">
+                                                    {gameId}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
                                 </div>
                             )}
 
                             <div className="text-center">
                                 <button
                                     onClick={abortGame}
-                                    className="py-3 px-6 bg-gradient-to-r from-red-600 to-pink-600 text-white font-medium rounded-lg hover:from-red-500 hover:to-pink-500 focus:outline-none focus:ring-2 focus:ring-red-400 focus:ring-offset-2 focus:ring-offset-gray-900 transition-all duration-300 transform hover:scale-105 shadow-lg shadow-red-500/25"
+                                    className="px-8 py-4 bg-gradient-to-r from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 text-white font-semibold rounded-lg transition-all duration-300 transform hover:scale-105 shadow-lg shadow-red-500/25"
                                 >
                                     Abort Game
                                 </button>

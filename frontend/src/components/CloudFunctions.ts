@@ -60,7 +60,7 @@ export const createGame = async (
         return result.data;
     } catch (error) {
         console.error("Error calling createGame function:", error);
-        throw error;
+        throw new Error("Failed to create game. Please try again.");
     }
 };
 
@@ -74,7 +74,9 @@ export const joinGame = async (
         return result.data;
     } catch (error) {
         console.error("Error calling joinGame function:", error);
-        throw error;
+        throw new Error(
+            "Failed to join game. Please check the game ID and try again."
+        );
     }
 };
 
@@ -86,7 +88,7 @@ export const startFightingPhase = async (
         return result.data;
     } catch (error) {
         console.error("Error calling startFightingPhase function:", error);
-        throw error;
+        throw new Error("Failed to start fighting phase. Please try again.");
     }
 };
 
@@ -98,6 +100,8 @@ export const scheduleGameTransition = async (
         return result.data;
     } catch (error) {
         console.error("Error calling scheduleGameTransition function:", error);
-        throw error;
+        throw new Error(
+            "Failed to schedule game transition. Please try again."
+        );
     }
 };

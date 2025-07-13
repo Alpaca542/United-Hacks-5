@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
+import FightingBar from "./FightingBar";
 
 // Constant for player editable rows (increased proportionally for 60x60 board)
 const PLAYER_EDITABLE_ROWS = 18;
@@ -7,8 +8,18 @@ interface GameCanvasProps {
     game: {
         id: string;
         state: string;
-        user1: { uid: string; username: string; ready: boolean } | null;
-        user2: { uid: string; username: string; ready: boolean } | null;
+        user1: {
+            uid: string;
+            username: string;
+            ready: boolean;
+            readyForFight?: boolean;
+        } | null;
+        user2: {
+            uid: string;
+            username: string;
+            ready: boolean;
+            readyForFight?: boolean;
+        } | null;
         grid: { [key: string]: number[] };
         finalGrid?: { [key: string]: number[] };
         winner?: string;
@@ -20,6 +31,9 @@ interface GameCanvasProps {
     onShapeDrop?: (shape: any, dropRow: number, dropCol: number) => void;
     selectedShape?: any;
     onShapePlace?: (shape: any, row: number, col: number) => void;
+    onClearSelectedShape?: () => void;
+    onClearPlayerCells?: () => void;
+    onToggleReadyForFight?: () => void;
 }
 
 const GameCanvas: React.FC<GameCanvasProps> = ({
@@ -31,6 +45,9 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     onShapeDrop,
     selectedShape,
     onShapePlace,
+    onClearSelectedShape,
+    onClearPlayerCells,
+    onToggleReadyForFight,
 }) => {
     const [animationGrid, setAnimationGrid] = useState<{
         [key: string]: number[];
@@ -77,13 +94,15 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
         };
 
         const handleKeyDown = (e: KeyboardEvent) => {
-            // Press Enter to exit shape placement mode
+            // Press Escape to exit shape placement mode
             if (e.key === "Escape" && selectedShape) {
                 e.preventDefault();
                 // Clear ghost position when exiting shape mode
                 setGhostPosition(null);
-                // You might want to call a parent callback here to clear the selected shape
-                // For now, we'll just clear the ghost position
+                // Call parent callback to clear the selected shape
+                if (onClearSelectedShape) {
+                    onClearSelectedShape();
+                }
             }
         };
 
@@ -99,7 +118,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
             window.removeEventListener("dragend", handleMouseUp);
             window.removeEventListener("keydown", handleKeyDown);
         };
-    }, [selectedShape]);
+    }, [selectedShape, onClearSelectedShape]);
 
     // Conway's Game of Life rules
     const runGameOfLifeStep = (currentGrid: {
@@ -432,6 +451,38 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
 
     const playerNumber = getPlayerNumber();
 
+    // Get current player's ready for fight status
+    const getCurrentPlayerReadyForFight = (): boolean => {
+        if (playerNumber === 1) return game.user1?.readyForFight || false;
+        if (playerNumber === 2) return game.user2?.readyForFight || false;
+        return false;
+    };
+
+    // Check if both players are ready for fight
+    const areBothPlayersReadyForFight = (): boolean => {
+        return (
+            (game.user1?.readyForFight || false) &&
+            (game.user2?.readyForFight || false)
+        );
+    };
+
+    // Handle ready for fight toggle
+    const handleToggleReadyForFight = () => {
+        if (game.state !== "started" || !onToggleReadyForFight) return;
+        onToggleReadyForFight();
+    };
+    const handleClearPlayerCells = () => {
+        if (!canEditGrid || !onClearPlayerCells) return;
+
+        // Clear ghost position if shape is selected
+        if (selectedShape) {
+            setGhostPosition(null);
+        }
+
+        // Call the parent callback to clear cells
+        onClearPlayerCells();
+    };
+
     // Handle cell click
     const handleCellClick = (row: number, col: number) => {
         if (playerNumber === 0) return; // Not a player in this game
@@ -628,9 +679,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
 
     // Render the grid
     const renderGrid = () => {
-        const rows = [];
+        const cells = [];
         for (let row = 0; row < gridSize; row++) {
-            const cols = [];
             for (let col = 0; col < gridSize; col++) {
                 const cellValue = getCellValue(row, col);
 
@@ -640,33 +690,61 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
                     ((playerNumber === 1 && row < PLAYER_EDITABLE_ROWS) ||
                         (playerNumber === 2 &&
                             row >= gridSize - PLAYER_EDITABLE_ROWS));
-                // Determine background color classes
+
+                // Determine background color classes with better visual hierarchy
                 let backgroundClasses = "";
+                let borderClasses = "border-slate-600/50";
+                let shadowClasses = "";
+
                 const isGhost = isGhostCell(row, col);
+
                 if (cellValue === 1) {
-                    backgroundClasses = "bg-blue-500";
-                } else if (cellValue === 2) {
-                    backgroundClasses = "bg-red-500";
-                } else if (isGhost) {
-                    // Ghost preview
                     backgroundClasses =
-                        playerNumber === 1 ? "bg-blue-300" : "bg-red-300";
+                        "bg-gradient-to-br from-blue-500 to-blue-600";
+                    borderClasses = "border-blue-400/60";
+                    shadowClasses = "shadow-sm shadow-blue-500/30";
+                } else if (cellValue === 2) {
+                    backgroundClasses =
+                        "bg-gradient-to-br from-red-500 to-red-600";
+                    borderClasses = "border-red-400/60";
+                    shadowClasses = "shadow-sm shadow-red-500/30";
+                } else if (isGhost) {
+                    // Ghost preview with subtle animation
+                    backgroundClasses =
+                        playerNumber === 1
+                            ? "bg-gradient-to-br from-blue-400/50 to-blue-500/50 animate-pulse"
+                            : "bg-gradient-to-br from-red-400/50 to-red-500/50 animate-pulse";
+                    borderClasses =
+                        playerNumber === 1
+                            ? "border-blue-400/70"
+                            : "border-red-400/70";
+                    shadowClasses = "shadow-sm shadow-blue-400/20";
                 } else if (canPlayerEdit) {
-                    // Highlight editable area for current player
-                    backgroundClasses = "bg-gray-300";
+                    // Highlight editable area for current player with subtle glow
+                    backgroundClasses =
+                        playerNumber === 1
+                            ? "bg-slate-700/80 hover:bg-slate-600/80"
+                            : "bg-slate-700/80 hover:bg-slate-600/80";
+                    borderClasses =
+                        playerNumber === 1
+                            ? "border-blue-500/30 hover:border-blue-400/50"
+                            : "border-red-500/30 hover:border-red-400/50";
                 } else {
                     // Neutral area or other player's area
-                    backgroundClasses = "bg-gray-700";
+                    backgroundClasses = "bg-slate-800/60";
+                    borderClasses = "border-slate-600/30";
                 }
 
-                cols.push(
+                cells.push(
                     <div
                         key={`${row}-${col}`}
-                        className={`w-3 h-3 border border-gray-600 ${backgroundClasses} ${
-                            canPlayerEdit || selectedShape
-                                ? "cursor-pointer"
-                                : "cursor-not-allowed"
-                        }`}
+                        className={`aspect-square border ${borderClasses} ${backgroundClasses} ${shadowClasses} 
+                            transition-all duration-150 ease-in-out
+                            ${
+                                canPlayerEdit || selectedShape
+                                    ? "cursor-pointer hover:scale-105 active:scale-95 hover:z-10"
+                                    : "cursor-not-allowed"
+                            }`}
                         onMouseEnter={() => {
                             if (mouseDownRef.current) {
                                 handleCellClick(row, col);
@@ -682,101 +760,136 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
                     />
                 );
             }
-            rows.push(
-                <div key={row} className="flex">
-                    {cols}
-                </div>
-            );
         }
-        return rows;
+        return cells;
     };
 
     // Get player theme colors
     const getPlayerTheme = () => {
         if (playerNumber === 1) {
             return {
-                bg: "bg-slate-900/95",
-                border: "border-blue-500/30",
-                text: "text-blue-300",
-                textSecondary: "text-blue-400",
-                button: "bg-blue-600 hover:bg-blue-700",
-                accent: "bg-blue-500",
+                bg: "bg-gradient-to-br from-slate-900 via-slate-800 to-blue-900/20",
+                border: "border-blue-500/40",
+                text: "text-blue-200",
+                textSecondary: "text-blue-300",
+                button: "bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-500 hover:to-blue-600 shadow-lg shadow-blue-500/25",
+                accent: "bg-gradient-to-r from-blue-500 to-blue-600",
+                glow: "shadow-lg shadow-blue-500/20",
             };
         } else if (playerNumber === 2) {
             return {
-                bg: "bg-slate-900/95",
-                border: "border-red-500/30",
-                text: "text-red-300",
-                textSecondary: "text-red-400",
-                button: "bg-red-600 hover:bg-red-700",
-                accent: "bg-red-500",
+                bg: "bg-gradient-to-br from-slate-900 via-slate-800 to-red-900/20",
+                border: "border-red-500/40",
+                text: "text-red-200",
+                textSecondary: "text-red-300",
+                button: "bg-gradient-to-r from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 shadow-lg shadow-red-500/25",
+                accent: "bg-gradient-to-r from-red-500 to-red-600",
+                glow: "shadow-lg shadow-red-500/20",
             };
         }
         return {
-            bg: "bg-slate-900/95",
-            border: "border-gray-500/30",
-            text: "text-gray-300",
-            textSecondary: "text-gray-400",
-            button: "bg-gray-600 hover:bg-gray-700",
-            accent: "bg-gray-500",
+            bg: "bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900",
+            border: "border-slate-500/40",
+            text: "text-slate-200",
+            textSecondary: "text-slate-300",
+            button: "bg-gradient-to-r from-slate-600 to-slate-700 hover:from-slate-500 hover:to-slate-600 shadow-lg shadow-slate-500/25",
+            accent: "bg-gradient-to-r from-slate-500 to-slate-600",
+            glow: "shadow-lg shadow-slate-500/20",
         };
     };
 
     const theme = getPlayerTheme();
 
+    // Memoize win screen condition to prevent lag
+    const shouldShowWinScreen = useMemo(() => {
+        return (
+            (game.state === "fighting" || game.state === "finished") &&
+            !isAnimating &&
+            game.winner
+        );
+    }, [game.state, game.winner, isAnimating]);
+
     return (
         <div
-            className={`${theme.bg} ${theme.border} border rounded-lg p-4 h-screen flex flex-col`}
+            className={`${theme.bg} ${theme.border} ${theme.glow} border-2 rounded-xl p-4 h-screen flex flex-col backdrop-blur-sm`}
+            style={{ width: "800px", maxWidth: "90vw" }}
         >
-            {/* Compact Header */}
+            {/* Enhanced Header */}
             <div className="mb-4 flex-shrink-0">
-                <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center justify-between mb-4">
                     <div
-                        className={`${theme.button} text-white px-4 py-2 rounded font-medium`}
+                        className={`${theme.button} text-white px-6 py-3 rounded-lg font-bold tracking-wide text-sm transition-all duration-300 transform hover:scale-105`}
                     >
                         PLAYER {playerNumber}
                     </div>
 
-                    {/* Preview Controls - Compact */}
+                    {/* Enhanced Preview Controls */}
                     {playerNumber > 0 && (
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-3">
                             {!isPreviewMode ? (
-                                <button
-                                    onClick={startPreview}
-                                    className={`${theme.button} text-white px-4 py-2 rounded font-medium`}
-                                >
-                                    PREVIEW
-                                </button>
+                                <>
+                                    <button
+                                        onClick={startPreview}
+                                        className={`${theme.button} text-white px-5 py-2.5 rounded-lg font-semibold text-sm transition-all duration-300 transform hover:scale-105`}
+                                    >
+                                        PREVIEW
+                                    </button>
+                                    {canEditGrid && onClearPlayerCells && (
+                                        <button
+                                            onClick={handleClearPlayerCells}
+                                            className="bg-gradient-to-r from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 text-white px-5 py-2.5 rounded-lg font-semibold text-sm transition-all duration-300 transform hover:scale-105 shadow-lg shadow-red-500/25"
+                                        >
+                                            CLEAR ALL
+                                        </button>
+                                    )}
+                                    {game.state === "started" &&
+                                        onToggleReadyForFight && (
+                                            <button
+                                                onClick={
+                                                    handleToggleReadyForFight
+                                                }
+                                                className={`px-5 py-2.5 rounded-lg font-semibold text-sm transition-all duration-300 transform hover:scale-105 ${
+                                                    getCurrentPlayerReadyForFight()
+                                                        ? "bg-gradient-to-r from-green-600 to-green-700 hover:from-green-500 hover:to-green-600 text-white shadow-lg shadow-green-500/25"
+                                                        : "bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-500 hover:to-amber-600 text-white shadow-lg shadow-amber-500/25"
+                                                }`}
+                                            >
+                                                {getCurrentPlayerReadyForFight()
+                                                    ? "READY TO FIGHT"
+                                                    : "NOT READY"}
+                                            </button>
+                                        )}
+                                </>
                             ) : (
-                                <div className="flex items-center gap-2">
+                                <div className="flex items-center gap-2 bg-slate-800/60 rounded-lg p-2 border border-slate-600/40">
                                     <button
                                         onClick={stopPreview}
-                                        className="bg-gray-600 hover:bg-gray-700 text-white px-3 py-1 rounded text-sm"
+                                        className="bg-gradient-to-r from-slate-600 to-slate-700 hover:from-slate-500 hover:to-slate-600 text-white px-3 py-1.5 rounded-md text-sm font-medium transition-all duration-200"
                                     >
                                         EXIT
                                     </button>
                                     <button
                                         onClick={resetPreview}
-                                        className={`${theme.button} text-white px-3 py-1 rounded text-sm`}
+                                        className={`${theme.button} text-white px-3 py-1.5 rounded-md text-sm font-medium transition-all duration-200`}
                                     >
                                         RESET
                                     </button>
                                     <div
-                                        className={`${theme.text} px-3 py-1 bg-gray-800 rounded text-sm`}
+                                        className={`${theme.text} px-3 py-1.5 bg-slate-800/80 rounded-md text-sm font-mono border border-slate-600/40`}
                                     >
                                         {previewGeneration}/200
                                     </div>
                                     {!isPreviewRunning ? (
                                         <button
                                             onClick={resumePreview}
-                                            className="bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded text-sm"
+                                            className="bg-gradient-to-r from-green-600 to-green-700 hover:from-green-500 hover:to-green-600 text-white px-3 py-1.5 rounded-md text-sm font-medium transition-all duration-200"
                                         >
                                             PLAY
                                         </button>
                                     ) : (
                                         <button
                                             onClick={pausePreview}
-                                            className="bg-yellow-600 hover:bg-yellow-700 text-white px-3 py-1 rounded text-sm"
+                                            className="bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-500 hover:to-amber-600 text-white px-3 py-1.5 rounded-md text-sm font-medium transition-all duration-200"
                                         >
                                             PAUSE
                                         </button>
@@ -784,16 +897,16 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
                                     <button
                                         onClick={stepForwardPreview}
                                         disabled={previewGeneration >= 200}
-                                        className={`${theme.button} text-white px-3 py-1 rounded text-sm disabled:opacity-50 disabled:cursor-not-allowed`}
+                                        className={`${theme.button} text-white px-3 py-1.5 rounded-md text-sm font-medium transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100`}
                                     >
-                                        +
+                                        →
                                     </button>
                                     <button
                                         onClick={stepBackwardPreview}
                                         disabled={previewGeneration <= 0}
-                                        className={`${theme.button} text-white px-3 py-1 rounded text-sm disabled:opacity-50 disabled:cursor-not-allowed`}
+                                        className={`${theme.button} text-white px-3 py-1.5 rounded-md text-sm font-medium transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100`}
                                     >
-                                        -
+                                        ←
                                     </button>
                                 </div>
                             )}
@@ -801,58 +914,117 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
                     )}
                 </div>
 
-                {/* Status Messages - Compact */}
-                {canEditGrid && selectedShape && (
-                    <div className="bg-gray-800 rounded p-2 mb-2">
-                        <p className={`${theme.text} text-sm text-center`}>
-                            SHAPE PLACEMENT MODE - Press ENTER to exit
-                        </p>
-                    </div>
-                )}
-
-                {canEditGrid && !selectedShape && (
-                    <div className="bg-gray-800 rounded p-2 mb-2">
-                        <p className={`${theme.text} text-sm text-center`}>
-                            EDITABLE ROWS:{" "}
-                            {playerNumber === 1
-                                ? `0-${PLAYER_EDITABLE_ROWS - 1}`
-                                : `${gridSize - PLAYER_EDITABLE_ROWS}-${
-                                      gridSize - 1
-                                  }`}
-                        </p>
-                    </div>
-                )}
-
-                {isAnimating && (
-                    <div className="bg-gray-800 rounded p-2 mb-2">
-                        <div className="flex items-center justify-between">
-                            <p className={`${theme.text} text-sm font-medium`}>
-                                SIMULATION: {animationGeneration} / 1000
+                {/* Enhanced Status Messages */}
+                {game.state === "started" && areBothPlayersReadyForFight() && (
+                    <div className="bg-gradient-to-r from-amber-800/80 to-amber-900/80 backdrop-blur-sm rounded-lg p-3 mb-3 border border-amber-500/40 shadow-lg shadow-amber-500/20">
+                        <div className="flex items-center justify-center gap-2">
+                            <div className="animate-spin rounded-full h-4 w-4 border-2 border-amber-300 border-t-transparent"></div>
+                            <p className="text-amber-200 text-sm font-semibold tracking-wide">
+                                BOTH PLAYERS READY - BATTLE STARTING...
                             </p>
-                            <div className="w-32 h-2 bg-gray-700 rounded overflow-hidden">
+                        </div>
+                    </div>
+                )}
+
+                {game.state === "started" && !areBothPlayersReadyForFight() && (
+                    <div className="bg-gradient-to-r from-slate-800/80 to-slate-900/80 backdrop-blur-sm rounded-lg p-4 mb-3 border border-slate-600/40">
+                        <p className="text-slate-300 text-sm text-center font-medium mb-3">
+                            WAITING FOR PLAYERS TO BE READY FOR FIGHT
+                        </p>
+                        <div className="flex justify-center gap-6">
+                            <div className="flex items-center gap-2">
                                 <div
-                                    className={`h-full ${theme.accent} transition-all duration-100`}
-                                    style={{
-                                        width: `${
-                                            (animationGeneration / 1000) * 100
-                                        }%`,
-                                    }}
-                                />
+                                    className={`w-3 h-3 rounded-full transition-all duration-300 ${
+                                        game.user1?.readyForFight
+                                            ? "bg-green-500 shadow-lg shadow-green-500/50 animate-pulse"
+                                            : "bg-slate-600"
+                                    }`}
+                                ></div>
+                                <span className="text-xs font-medium text-slate-400">
+                                    {game.user1?.username || "Player 1"}
+                                </span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <div
+                                    className={`w-3 h-3 rounded-full transition-all duration-300 ${
+                                        game.user2?.readyForFight
+                                            ? "bg-green-500 shadow-lg shadow-green-500/50 animate-pulse"
+                                            : "bg-slate-600"
+                                    }`}
+                                ></div>
+                                <span className="text-xs font-medium text-slate-400">
+                                    {game.user2?.username || "Player 2"}
+                                </span>
                             </div>
                         </div>
                     </div>
                 )}
 
-                {game.state === "fighting" && !isAnimating && game.winner && (
-                    <div className="bg-green-800 rounded p-3 mb-2">
+                {canEditGrid && selectedShape && (
+                    <div className="bg-gradient-to-r from-slate-800/80 to-slate-900/80 backdrop-blur-sm rounded-lg p-3 mb-3 border border-slate-600/40">
+                        <div className="flex items-center justify-center gap-2">
+                            <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
+                            <p className={`${theme.text} text-sm font-medium`}>
+                                SHAPE PLACEMENT MODE - Press ESC to exit
+                            </p>
+                        </div>
+                    </div>
+                )}
+
+                {canEditGrid && !selectedShape && (
+                    <div className="bg-gradient-to-r from-slate-800/80 to-slate-900/80 backdrop-blur-sm rounded-lg p-3 mb-3 border border-slate-600/40">
+                        <p
+                            className={`${theme.text} text-sm text-center font-medium`}
+                        >
+                            EDITABLE ROWS:{" "}
+                            <span className="font-mono text-slate-300">
+                                {playerNumber === 1
+                                    ? `0-${PLAYER_EDITABLE_ROWS - 1}`
+                                    : `${gridSize - PLAYER_EDITABLE_ROWS}-${
+                                          gridSize - 1
+                                      }`}
+                            </span>
+                        </p>
+                    </div>
+                )}
+
+                {isAnimating && (
+                    <div className="bg-gradient-to-r from-slate-800/80 to-slate-900/80 backdrop-blur-sm rounded-lg p-4 mb-3 border border-slate-600/40">
+                        <div className="flex items-center justify-between mb-2">
+                            <p
+                                className={`${theme.text} text-sm font-semibold`}
+                            >
+                                SIMULATION RUNNING
+                            </p>
+                            <p className={`${theme.text} text-sm font-mono`}>
+                                {animationGeneration} / 1000
+                            </p>
+                        </div>
+                        <div className="w-full h-2 bg-slate-700 rounded-full overflow-hidden">
+                            <div
+                                className={`h-full ${theme.accent} transition-all duration-100 ease-out`}
+                                style={{
+                                    width: `${
+                                        (animationGeneration / 1000) * 100
+                                    }%`,
+                                }}
+                            />
+                        </div>
+                    </div>
+                )}
+
+                {shouldShowWinScreen && (
+                    <div className="bg-gradient-to-r from-green-800/80 to-green-900/80 backdrop-blur-sm rounded-lg p-4 mb-3 border border-green-500/40 shadow-lg shadow-green-500/20">
                         <div className="text-center">
-                            <h3 className="text-lg font-bold text-green-300 mb-1">
-                                BATTLE COMPLETE
+                            <h3 className="text-lg font-bold text-green-300 mb-2 tracking-wide">
+                                🏆 BATTLE COMPLETE 🏆
                             </h3>
                             {game.winner === "tie" ? (
-                                <p className="text-green-400">DRAW</p>
+                                <p className="text-green-200 font-semibold">
+                                    DRAW
+                                </p>
                             ) : (
-                                <p className="text-green-400">
+                                <p className="text-green-200 font-semibold">
                                     PLAYER{" "}
                                     {game.winner === "player1" ? "1" : "2"} WINS
                                 </p>
@@ -862,38 +1034,86 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
                 )}
 
                 {game.state === "fighting" && !isAnimating && !game.winner && (
-                    <div className="bg-gray-800 rounded p-2 mb-2">
-                        <p className={`${theme.text} text-sm text-center`}>
-                            PROCESSING BATTLE...
-                        </p>
+                    <div className="bg-gradient-to-r from-slate-800/80 to-slate-900/80 backdrop-blur-sm rounded-lg p-3 mb-3 border border-slate-600/40">
+                        <div className="flex items-center justify-center gap-2">
+                            <div className="animate-spin rounded-full h-4 w-4 border-2 border-slate-300 border-t-transparent"></div>
+                            <p className={`${theme.text} text-sm font-medium`}>
+                                PROCESSING BATTLE...
+                            </p>
+                        </div>
                     </div>
                 )}
 
                 {isPreviewMode && (
-                    <div className="bg-gray-800 rounded p-2 mb-2">
-                        <div className="flex items-center justify-between">
-                            <p className={`${theme.text} text-sm`}>
+                    <div className="bg-gradient-to-r from-slate-800/80 to-slate-900/80 backdrop-blur-sm rounded-lg p-4 mb-3 border border-slate-600/40">
+                        <div className="flex items-center justify-between mb-2">
+                            <p
+                                className={`${theme.text} text-sm font-semibold`}
+                            >
                                 PREVIEW MODE
                             </p>
-                            <div className="w-32 h-2 bg-gray-700 rounded overflow-hidden">
-                                <div
-                                    className={`h-full ${theme.accent} transition-all duration-100`}
-                                    style={{
-                                        width: `${
-                                            (previewGeneration / 200) * 100
-                                        }%`,
-                                    }}
-                                />
-                            </div>
+                            <p className={`${theme.text} text-sm font-mono`}>
+                                {previewGeneration}/200
+                            </p>
+                        </div>
+                        <div className="w-full h-2 bg-slate-700 rounded-full overflow-hidden">
+                            <div
+                                className={`h-full ${theme.accent} transition-all duration-100 ease-out`}
+                                style={{
+                                    width: `${
+                                        (previewGeneration / 200) * 100
+                                    }%`,
+                                }}
+                            />
                         </div>
                     </div>
                 )}
             </div>
 
-            {/* Game Grid - Main Focus */}
-            <div className="flex-1 flex items-center justify-center">
-                <div className="bg-gray-900 rounded border border-gray-700 p-2">
-                    {renderGrid()}
+            {/* Fighting Bar - Cell Count Display */}
+            <div className="mb-3 flex-shrink-0">
+                <FightingBar
+                    grid={
+                        isPreviewMode && previewGrid
+                            ? previewGrid
+                            : isAnimating && animationGrid
+                            ? animationGrid
+                            : game.grid
+                    }
+                    gridSize={gridSize}
+                    showAnimatedNumbers={isAnimating}
+                />
+            </div>
+
+            {/* Enhanced Game Grid */}
+            <div className="flex-1 flex items-center justify-center overflow-hidden">
+                <div
+                    className="bg-slate-900/80 backdrop-blur-sm rounded-xl border-2 border-slate-700/50 p-3 shadow-2xl shadow-slate-900/50"
+                    style={{
+                        height: "fit-content",
+                        maxHeight: "100%",
+                        width: "fit-content",
+                        maxWidth: "100%",
+                    }}
+                >
+                    <div 
+                        className="bg-slate-800/60 rounded-lg p-1 border border-slate-600/40 overflow-hidden"
+                        style={{
+                            width: "fit-content",
+                            height: "fit-content",
+                        }}
+                    >
+                        <div 
+                            className="grid gap-px"
+                            style={{
+                                gridTemplateColumns: `repeat(${gridSize}, minmax(0, 1fr))`,
+                                width: "min(70vh, 600px)",
+                                height: "min(70vh, 600px)",
+                            }}
+                        >
+                            {renderGrid()}
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
