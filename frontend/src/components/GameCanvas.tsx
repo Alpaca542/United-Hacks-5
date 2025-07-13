@@ -108,23 +108,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
         );
     }, [isPreviewMode, isAnimating, game.state]);
 
-    // Memoize cell value getter for performance
-    const getCellValue = useCallback(
-        (row: number, col: number): number => {
-            let currentGrid;
-            if (isPreviewMode && previewGrid) {
-                currentGrid = previewGrid;
-            } else if (isAnimating && animationGrid) {
-                currentGrid = animationGrid;
-            } else {
-                currentGrid = game.grid;
-            }
-            const rowData = currentGrid[`row${row}`];
-            return rowData ? rowData[col] || 0 : 0;
-        },
-        [isPreviewMode, previewGrid, isAnimating, animationGrid, game.grid]
-    );
-
     // Memoize ghost cell checker
     const isGhostCell = useCallback(
         (row: number, col: number): boolean => {
@@ -282,7 +265,45 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
 
         return false;
     };
+    // Memoize win screen condition to prevent lag
+    // Memoize cell value getter for performance
+    const getCellValue = useCallback(
+        (row: number, col: number): number => {
+            let currentGrid;
+            if (isPreviewMode && previewGrid) {
+                currentGrid = previewGrid;
+            } else if (
+                (isAnimating && animationGrid) ||
+                ((game.state === "fighting" || game.state === "finished") &&
+                    !isAnimating &&
+                    game.winner &&
+                    animationGrid)
+            ) {
+                currentGrid = animationGrid;
+            } else {
+                currentGrid = game.grid;
+            }
+            const rowData = currentGrid[`row${row}`];
+            return rowData ? rowData[col] || 0 : 0;
+        },
+        [
+            isPreviewMode,
+            previewGrid,
+            isAnimating,
+            animationGrid,
+            game.grid,
+            game.state,
+            game.winner,
+        ]
+    );
 
+    const shouldShowWinScreen = useMemo(() => {
+        return (
+            (game.state === "fighting" || game.state === "finished") &&
+            !isAnimating &&
+            game.winner
+        );
+    }, [game.state, game.winner, isAnimating]);
     const countNeighbors = (
         grid: { [key: string]: number[] },
         row: number,
@@ -339,7 +360,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
 
     // Run animation steps
     useEffect(() => {
-        if (isAnimating && animationGrid && animationGeneration < 1000) {
+        if (isAnimating && animationGrid && animationGeneration < 500) {
             const timer = setTimeout(() => {
                 // Check if we've reached a stable state before computing next step
                 if (hasReachedStableState(animationGrid)) {
@@ -376,7 +397,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
             }, 50); // 50ms between generations for smooth animation
 
             return () => clearTimeout(timer);
-        } else if (isAnimating && animationGeneration >= 1000) {
+        } else if (isAnimating && animationGeneration >= 500) {
             setIsAnimating(false);
             if (onAnimationComplete) {
                 onAnimationComplete();
@@ -843,31 +864,122 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
         };
     }, [playerNumber]);
 
-    // Memoize win screen condition to prevent lag
-    const shouldShowWinScreen = useMemo(() => {
-        return (
-            (game.state === "fighting" || game.state === "finished") &&
-            !isAnimating &&
-            game.winner
-        );
-    }, [game.state, game.winner, isAnimating]);
+    // Icon components for better performance and consistency
+    const ClearIcon = ({ className = "w-4 h-4" }) => (
+        <svg
+            className={className}
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+        >
+            <path d="M3 6h18l-2 13H5L3 6zM8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+            <path d="M10 11v6M14 11v6" />
+        </svg>
+    );
+
+    const EyeIcon = ({ className = "w-4 h-4" }) => (
+        <svg
+            className={className}
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+        >
+            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+            <circle cx="12" cy="12" r="3" />
+        </svg>
+    );
+
+    const PlayIcon = ({ className = "w-4 h-4" }) => (
+        <svg className={className} viewBox="0 0 24 24" fill="currentColor">
+            <path d="M8 5v14l11-7z" />
+        </svg>
+    );
+
+    const PauseIcon = ({ className = "w-4 h-4" }) => (
+        <svg className={className} viewBox="0 0 24 24" fill="currentColor">
+            <path d="M6 4h4v16H6V4zM14 4h4v16h-4V4z" />
+        </svg>
+    );
+
+    const SkipBackIcon = ({ className = "w-4 h-4" }) => (
+        <svg className={className} viewBox="0 0 24 24" fill="currentColor">
+            <path d="M19 20L9 12l10-8v16zM5 4v16h2V4H5z" />
+        </svg>
+    );
+
+    const SkipForwardIcon = ({ className = "w-4 h-4" }) => (
+        <svg className={className} viewBox="0 0 24 24" fill="currentColor">
+            <path d="M5 4l10 8-10 8V4zM17 4v16h2V4h-2z" />
+        </svg>
+    );
+
+    const RefreshIcon = ({ className = "w-4 h-4" }) => (
+        <svg
+            className={className}
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+        >
+            <path d="M23 4v6h-6M1 20v-6h6" />
+            <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15" />
+        </svg>
+    );
+
+    const XIcon = ({ className = "w-4 h-4" }) => (
+        <svg
+            className={className}
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+        >
+            <path d="M18 6L6 18M6 6l12 12" />
+        </svg>
+    );
+
+    const CheckIcon = ({ className = "w-4 h-4" }) => (
+        <svg
+            className={className}
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+        >
+            <path d="M20 6L9 17l-5-5" />
+        </svg>
+    );
+
+    const CircleIcon = ({ className = "w-4 h-4" }) => (
+        <svg
+            className={className}
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+        >
+            <circle cx="12" cy="12" r="10" />
+        </svg>
+    );
 
     return (
-        <div className="w-full h-screen flex flex-col bg-slate-900 overflow-hidden">
-            {/* Compact Header Bar */}
-            <div
-                className={`${theme.bg} ${theme.border} border-b-2 px-4 py-2 flex-shrink-0 backdrop-blur-sm`}
+        <div className="w-full h-full flex flex-col bg-slate-900/50 backdrop-blur-sm rounded-xl border border-slate-700/50 overflow-hidden">
+            {/* Clean Header Bar */}
+            <header
+                className={`${theme.bg} ${theme.border} border-b px-4 py-2 flex-shrink-0 backdrop-blur-sm`}
             >
                 <div className="flex items-center justify-between gap-4">
                     {/* Player Badge */}
                     <div
-                        className={`${theme.button} text-white px-3 py-1.5 rounded-md font-bold text-sm flex-shrink-0`}
+                        className={`${theme.button} text-white px-3 py-1.5 rounded-lg font-bold text-sm flex-shrink-0 shadow-md`}
                     >
-                        P{playerNumber}
+                        Player {playerNumber}
                     </div>
 
-                    {/* Fighting Bar - Compact */}
-                    <div className="flex-1 max-w-md">
+                    {/* Fighting Bar - Center */}
+                    <div className="flex-1 max-w-md mx-4">
                         <FightingBar
                             grid={
                                 (isPreviewMode && previewGrid) ||
@@ -880,43 +992,61 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
                         />
                     </div>
 
-                    {/* Action Buttons - Compact */}
+                    {/* Action Buttons - Right */}
                     {playerNumber > 0 && (
                         <div className="flex items-center gap-2 flex-shrink-0">
                             {/* Clear button */}
                             <button
                                 onClick={handleClearPlayerCells}
                                 disabled={!canEditGrid}
-                                className={`${theme.button} text-white px-3 py-1.5 rounded-md text-sm font-medium transition-all duration-200 hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100`}
+                                className={`${theme.button} text-white px-3 py-1.5 rounded-lg text-sm font-medium transition-colors duration-200 hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2`}
+                                title="Clear board"
                             >
-                                Clear
+                                <ClearIcon />
+                                <span className="hidden sm:inline">Clear</span>
                             </button>
 
                             {/* Ready for fight button */}
                             {game.state === "started" && (
                                 <button
                                     onClick={handleToggleReadyForFight}
-                                    className={`px-3 py-1.5 rounded-md text-sm font-medium transition-all duration-200 hover:scale-105 ${
+                                    className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors duration-200 hover:opacity-90 flex items-center gap-2 ${
                                         getCurrentPlayerReadyForFight()
-                                            ? "bg-green-600 hover:bg-green-500 text-white"
+                                            ? "bg-green-600 hover:bg-green-500 text-white shadow-md"
                                             : `${theme.button} text-white`
                                     }`}
+                                    title={
+                                        getCurrentPlayerReadyForFight()
+                                            ? "Ready for battle"
+                                            : "Mark as ready"
+                                    }
                                 >
-                                    {getCurrentPlayerReadyForFight()
-                                        ? "Ready!"
-                                        : "Ready"}
+                                    {getCurrentPlayerReadyForFight() ? (
+                                        <CheckIcon />
+                                    ) : (
+                                        <CircleIcon />
+                                    )}
+                                    <span className="hidden sm:inline">
+                                        {getCurrentPlayerReadyForFight()
+                                            ? "Ready!"
+                                            : "Ready"}
+                                    </span>
                                 </button>
                             )}
 
                             {/* Preview controls */}
-                            <div className="flex gap-1">
+                            <div className="flex items-center gap-1 bg-slate-800/50 rounded-lg p-1 border border-slate-600/30">
                                 {!isPreviewMode ? (
                                     <button
                                         onClick={startPreview}
                                         disabled={!canEditGrid}
-                                        className={`${theme.button} text-white px-3 py-1.5 rounded-md text-sm font-medium transition-all duration-200 hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100`}
+                                        className={`${theme.button} text-white px-3 py-1.5 rounded-md text-sm font-medium transition-colors duration-200 hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2`}
+                                        title="Start preview"
                                     >
-                                        Preview
+                                        <EyeIcon />
+                                        <span className="hidden sm:inline">
+                                            Preview
+                                        </span>
                                     </button>
                                 ) : (
                                     <>
@@ -926,37 +1056,50 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
                                                     ? pausePreview
                                                     : resumePreview
                                             }
-                                            className={`${theme.button} text-white px-2 py-1.5 rounded-md text-sm transition-all duration-200 hover:scale-105`}
+                                            className={`${theme.button} text-white p-1.5 rounded-md transition-colors duration-200 hover:opacity-90`}
+                                            title={
+                                                isPreviewRunning
+                                                    ? "Pause preview"
+                                                    : "Resume preview"
+                                            }
                                         >
-                                            {isPreviewRunning ? "⏸️" : "▶️"}
+                                            {isPreviewRunning ? (
+                                                <PauseIcon />
+                                            ) : (
+                                                <PlayIcon />
+                                            )}
                                         </button>
                                         <button
                                             onClick={stepBackwardPreview}
                                             disabled={
                                                 previewHistory.length <= 1
                                             }
-                                            className={`${theme.button} text-white px-2 py-1.5 rounded-md text-sm transition-all duration-200 hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100`}
+                                            className={`${theme.button} text-white p-1.5 rounded-md transition-colors duration-200 hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed`}
+                                            title="Step backward"
                                         >
-                                            ⏮️
+                                            <SkipBackIcon />
                                         </button>
                                         <button
                                             onClick={stepForwardPreview}
                                             disabled={previewGeneration >= 200}
-                                            className={`${theme.button} text-white px-2 py-1.5 rounded-md text-sm transition-all duration-200 hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100`}
+                                            className={`${theme.button} text-white p-1.5 rounded-md transition-colors duration-200 hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed`}
+                                            title="Step forward"
                                         >
-                                            ⏭️
+                                            <SkipForwardIcon />
                                         </button>
                                         <button
                                             onClick={resetPreview}
-                                            className={`${theme.button} text-white px-2 py-1.5 rounded-md text-sm transition-all duration-200 hover:scale-105`}
+                                            className={`${theme.button} text-white p-1.5 rounded-md transition-colors duration-200 hover:opacity-90`}
+                                            title="Reset preview"
                                         >
-                                            🔄
+                                            <RefreshIcon />
                                         </button>
                                         <button
                                             onClick={stopPreview}
-                                            className={`${theme.button} text-white px-2 py-1.5 rounded-md text-sm transition-all duration-200 hover:scale-105`}
+                                            className={`bg-red-600 hover:bg-red-500 text-white p-1.5 rounded-md transition-colors duration-200`}
+                                            title="Stop preview"
                                         >
-                                            ❌
+                                            <XIcon />
                                         </button>
                                     </>
                                 )}
@@ -964,17 +1107,17 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
                         </div>
                     )}
                 </div>
-            </div>
+            </header>
 
             {/* Status Messages Bar - Compact */}
-            <div className="flex-shrink-0 px-4 py-1">
+            <div className="flex-shrink-0 px-2 sm:px-4 py-1">
                 {/* Battle starting message */}
                 {game.state === "started" && areBothPlayersReadyForFight() && (
-                    <div className="bg-gradient-to-r from-amber-800/80 to-amber-900/80 backdrop-blur-sm rounded-lg p-2 border border-amber-500/40">
-                        <div className="flex items-center justify-center gap-2">
-                            <div className="animate-spin rounded-full h-3 w-3 border-2 border-amber-300 border-t-transparent"></div>
+                    <div className="bg-gradient-to-r from-amber-800/80 to-amber-900/80 backdrop-blur-sm rounded-lg p-1.5 sm:p-2 border border-amber-500/40">
+                        <div className="flex items-center justify-center gap-1 sm:gap-2">
+                            <div className="animate-spin rounded-full h-2 w-2 sm:h-3 sm:w-3 border-2 border-amber-300 border-t-transparent"></div>
                             <p className="text-amber-200 text-xs font-semibold">
-                                BOTH PLAYERS READY - BATTLE STARTING...
+                                BATTLE STARTING...
                             </p>
                         </div>
                     </div>
@@ -982,15 +1125,15 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
 
                 {/* Waiting for players message */}
                 {game.state === "started" && !areBothPlayersReadyForFight() && (
-                    <div className="bg-gradient-to-r from-slate-800/80 to-slate-900/80 backdrop-blur-sm rounded-lg p-2 border border-slate-600/40">
-                        <div className="flex items-center justify-center gap-4">
+                    <div className="bg-gradient-to-r from-slate-800/80 to-slate-900/80 backdrop-blur-sm rounded-lg p-1.5 sm:p-2 border border-slate-600/40">
+                        <div className="flex items-center justify-center gap-2 sm:gap-4">
                             <p className="text-slate-300 text-xs font-medium">
                                 WAITING FOR PLAYERS
                             </p>
-                            <div className="flex gap-3">
+                            <div className="flex gap-2 sm:gap-3">
                                 <div className="flex items-center gap-1">
                                     <div
-                                        className={`w-2 h-2 rounded-full ${
+                                        className={`w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full ${
                                             game.user1?.readyForFight
                                                 ? "bg-green-500 animate-pulse"
                                                 : "bg-slate-600"
@@ -1002,7 +1145,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
                                 </div>
                                 <div className="flex items-center gap-1">
                                     <div
-                                        className={`w-2 h-2 rounded-full ${
+                                        className={`w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full ${
                                             game.user2?.readyForFight
                                                 ? "bg-green-500 animate-pulse"
                                                 : "bg-slate-600"
@@ -1019,11 +1162,11 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
 
                 {/* Shape placement mode */}
                 {canEditGrid && selectedShape && (
-                    <div className="bg-gradient-to-r from-slate-800/80 to-slate-900/80 backdrop-blur-sm rounded-lg p-2 border border-slate-600/40">
-                        <div className="flex items-center justify-center gap-2">
-                            <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
+                    <div className="bg-gradient-to-r from-slate-800/80 to-slate-900/80 backdrop-blur-sm rounded-lg p-1.5 sm:p-2 border border-slate-600/40">
+                        <div className="flex items-center justify-center gap-1 sm:gap-2">
+                            <div className="w-1.5 h-1.5 sm:w-2 sm:h-2 bg-blue-500 rounded-full animate-pulse"></div>
                             <p className="text-slate-300 text-xs font-medium">
-                                SHAPE PLACEMENT MODE - Press ESC to exit
+                                SHAPE MODE - ESC to exit
                             </p>
                         </div>
                     </div>
@@ -1031,7 +1174,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
 
                 {/* Editable rows info */}
                 {canEditGrid && !selectedShape && (
-                    <div className="bg-gradient-to-r from-slate-800/80 to-slate-900/80 backdrop-blur-sm rounded-lg p-2 border border-slate-600/40">
+                    <div className="bg-gradient-to-r from-slate-800/80 to-slate-900/80 backdrop-blur-sm rounded-lg p-1.5 sm:p-2 border border-slate-600/40">
                         <p className="text-slate-300 text-xs text-center font-medium">
                             EDITABLE ROWS:{" "}
                             <span className="font-mono text-slate-300">
@@ -1047,19 +1190,39 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
 
                 {/* Win screen */}
                 {shouldShowWinScreen && (
-                    <div className="bg-gradient-to-r from-green-800/80 to-green-900/80 backdrop-blur-sm rounded-lg p-3 border border-green-500/40">
+                    <div
+                        className={`bg-gradient-to-r backdrop-blur-sm rounded-lg p-2 sm:p-3 border ${
+                            game.winner === "tie"
+                                ? "from-yellow-800/80 to-yellow-900/80 border-yellow-500/40"
+                                : game.winner === `player${playerNumber}`
+                                ? "from-green-800/80 to-green-900/80 border-green-500/40"
+                                : "from-red-800/80 to-red-900/80 border-red-500/40"
+                        }`}
+                    >
                         <div className="text-center">
-                            <h3 className="text-base font-bold text-green-300 mb-1">
+                            <h3
+                                className={`text-sm sm:text-base font-bold mb-1 ${
+                                    game.winner === "tie"
+                                        ? "text-yellow-300"
+                                        : game.winner ===
+                                          `player${playerNumber}`
+                                        ? "text-green-300"
+                                        : "text-red-300"
+                                }`}
+                            >
                                 🏆 BATTLE COMPLETE 🏆
                             </h3>
                             {game.winner === "tie" ? (
-                                <p className="text-green-200 text-sm font-semibold">
+                                <p className="text-yellow-200 text-xs sm:text-sm font-semibold">
                                     DRAW
                                 </p>
+                            ) : game.winner === `player${playerNumber}` ? (
+                                <p className="text-green-200 text-xs sm:text-sm font-semibold">
+                                    YOU WON
+                                </p>
                             ) : (
-                                <p className="text-green-200 text-sm font-semibold">
-                                    PLAYER{" "}
-                                    {game.winner === "player1" ? "1" : "2"} WINS
+                                <p className="text-red-200 text-xs sm:text-sm font-semibold">
+                                    YOU LOSE
                                 </p>
                             )}
                         </div>
@@ -1068,9 +1231,9 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
 
                 {/* Processing battle */}
                 {game.state === "fighting" && !isAnimating && !game.winner && (
-                    <div className="bg-gradient-to-r from-slate-800/80 to-slate-900/80 backdrop-blur-sm rounded-lg p-2 border border-slate-600/40">
-                        <div className="flex items-center justify-center gap-2">
-                            <div className="animate-spin rounded-full h-3 w-3 border-2 border-slate-300 border-t-transparent"></div>
+                    <div className="bg-gradient-to-r from-slate-800/80 to-slate-900/80 backdrop-blur-sm rounded-lg p-1.5 sm:p-2 border border-slate-600/40">
+                        <div className="flex items-center justify-center gap-1 sm:gap-2">
+                            <div className="animate-spin rounded-full h-2 w-2 sm:h-3 sm:w-3 border-2 border-slate-300 border-t-transparent"></div>
                             <p className="text-slate-300 text-xs font-medium">
                                 PROCESSING BATTLE...
                             </p>
@@ -1080,12 +1243,12 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
             </div>
 
             {/* Main Game Area - Grid First */}
-            <div className="flex-1 flex items-center justify-center p-4 min-h-0">
-                <div className="flex flex-col items-center justify-center gap-4 h-full w-full max-w-5xl">
+            <div className="flex-1 flex items-center justify-center p-2 sm:p-4 min-h-0">
+                <div className="flex flex-col items-center justify-center gap-2 sm:gap-4 h-full w-full">
                     {/* Grid Container - Maximum space */}
-                    <div className="flex-1 flex items-center justify-center w-full">
+                    <div className="flex-1 flex items-center justify-center w-full min-h-0">
                         <div
-                            className="bg-slate-900/90 backdrop-blur-sm rounded-xl border-2 border-slate-700/50 p-2 shadow-2xl shadow-slate-900/50 transition-all duration-300"
+                            className="bg-slate-900/90 backdrop-blur-sm rounded-lg sm:rounded-xl border-2 border-slate-700/50 p-1 sm:p-2 shadow-2xl shadow-slate-900/50 transition-all duration-300"
                             style={{
                                 height: "fit-content",
                                 maxHeight: "100%",
@@ -1094,7 +1257,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
                             }}
                         >
                             <div
-                                className="bg-slate-800/70 rounded-lg p-1 border border-slate-600/40 overflow-hidden"
+                                className="bg-slate-800/70 rounded-md sm:rounded-lg p-1 border border-slate-600/40 overflow-hidden"
                                 style={{
                                     width: "fit-content",
                                     height: "fit-content",
@@ -1103,11 +1266,11 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
                                 }}
                             >
                                 <div
-                                    className="grid bg-slate-900/60 rounded-md overflow-hidden"
+                                    className="grid bg-slate-900/60 rounded-sm sm:rounded-md overflow-hidden"
                                     style={{
                                         gridTemplateColumns: `repeat(${gridSize}, minmax(0, 1fr))`,
-                                        width: "min(85vw, 70vh, 600px)",
-                                        height: "min(85vw, 70vh, 600px)",
+                                        width: "min(80vw, 60vh, 500px)",
+                                        height: "min(80vw, 60vh, 500px)",
                                         gap: "0.5px",
                                         padding: "1px",
                                     }}
@@ -1119,27 +1282,27 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
                     </div>
 
                     {/* Progress/Status Bar - Below Grid */}
-                    <div className="flex-shrink-0 w-full max-w-md">
+                    <div className="flex-shrink-0 w-full max-w-sm sm:max-w-md">
                         {(isAnimating || isPreviewMode) && (
-                            <div className="bg-slate-800/80 backdrop-blur-sm rounded-lg p-3 border border-slate-600/40">
-                                <div className="flex items-center justify-between mb-2">
-                                    <p className="text-slate-300 text-sm font-semibold">
+                            <div className="bg-slate-800/80 backdrop-blur-sm rounded-lg p-2 sm:p-3 border border-slate-600/40">
+                                <div className="flex items-center justify-between mb-1 sm:mb-2">
+                                    <p className="text-slate-300 text-xs sm:text-sm font-semibold">
                                         {isAnimating ? "SIMULATION" : "PREVIEW"}
                                     </p>
-                                    <p className="text-slate-300 text-sm font-mono">
+                                    <p className="text-slate-300 text-xs sm:text-sm font-mono">
                                         {isAnimating
-                                            ? `${animationGeneration}/1000`
+                                            ? `${animationGeneration}/500`
                                             : `${previewGeneration}/200`}
                                     </p>
                                 </div>
-                                <div className="w-full h-2 bg-slate-700 rounded-full overflow-hidden">
+                                <div className="w-full h-1.5 sm:h-2 bg-slate-700 rounded-full overflow-hidden">
                                     <div
                                         className={`h-full ${theme.accent} transition-all duration-300 ease-out`}
                                         style={{
                                             width: `${
                                                 isAnimating
                                                     ? (animationGeneration /
-                                                          1000) *
+                                                          500) *
                                                       100
                                                     : (previewGeneration /
                                                           200) *

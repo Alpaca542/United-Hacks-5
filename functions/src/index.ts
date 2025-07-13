@@ -182,7 +182,7 @@ export const startFightingPhase = onCall(
             logger.info(`Game ${gameId} transitioning to fighting`);
 
             // Run Conway's Game of Life simulation
-            const finalGrid = runGameOfLife(gameData.grid, 1000);
+            const finalGrid = runGameOfLife(gameData.grid, 500);
             const winner = determineWinner(finalGrid);
 
             await gameRef.update({
@@ -270,7 +270,7 @@ export const scheduleGameTransition = onCall(
                         // Run Conway's Game of Life simulation
                         const finalGrid = runGameOfLife(
                             currentGameData.grid,
-                            1000
+                            500
                         );
                         const winner = determineWinner(finalGrid);
 

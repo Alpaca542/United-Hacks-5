@@ -66,12 +66,12 @@ const GameWithShapes: React.FC<GameWithShapesProps> = ({
     };
 
     return (
-        <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 p-2 sm:p-4 overflow-hidden">
-            <div className="max-w-full mx-auto h-[calc(100vh-1rem)] sm:h-[calc(100vh-2rem)]">
-                <div className="grid grid-cols-1 lg:grid-cols-5 xl:grid-cols-6 gap-2 sm:gap-4 h-full">
-                    {/* Shape Storage - Flexible width sidebar */}
-                    <div className="lg:col-span-1 xl:col-span-1 flex justify-center lg:justify-start order-2 lg:order-1">
-                        <div className="w-full max-w-sm lg:max-w-none h-full">
+        <div className="min-h-screen from-slate-900 via-slate-800 to-slate-900 p-4">
+            <div className="max-w-[1920px] mx-auto h-full">
+                <div className="flex flex-col xl:flex-row gap-6 h-full">
+                    {/* Shape Storage - 1/3 of the width */}
+                    <div className="flex-1 xl:flex-none xl:w-1/3 flex justify-center">
+                        <div className="w-full max-w-sm xl:max-w-none">
                             <ShapeStorage
                                 playerNumber={getPlayerNumber()}
                                 onShapeSelect={handleShapeSelect}
@@ -80,9 +80,9 @@ const GameWithShapes: React.FC<GameWithShapesProps> = ({
                         </div>
                     </div>
 
-                    {/* Game Canvas - Takes remaining space */}
-                    <div className="lg:col-span-4 xl:col-span-5 flex justify-center items-center overflow-hidden order-1 lg:order-2">
-                        <div className="w-full h-full flex items-center justify-center">
+                    {/* Game Canvas - 2/3 of the width (twice as large) */}
+                    <div className="flex-1 xl:flex-none xl:w-2/3 flex justify-center items-center">
+                        <div className="w-full max-w-5xl">
                             <GameCanvas
                                 game={game}
                                 currentUser={currentUser}

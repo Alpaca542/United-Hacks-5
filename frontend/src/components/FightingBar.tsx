@@ -146,19 +146,25 @@ const FightingBar: React.FC<FightingBarProps> = ({
             </div>
 
             {/* Leading Player Indicator */}
-            {leadingPlayer !== 0 && (
+            {
                 <div className="mt-2 text-center">
                     <div
                         className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium transition-all duration-300 ${
                             leadingPlayer === 1
                                 ? "bg-blue-500/20 text-blue-200 border border-blue-500/30"
-                                : "bg-red-500/20 text-red-200 border border-red-500/30"
+                                : leadingPlayer === 2
+                                ? "bg-red-500/20 text-red-200 border border-red-500/30"
+                                : "bg-slate-500/20 text-slate-300 border border-slate-500/30"
                         }`}
                     >
-                        {leadingPlayer === 1 ? "Blue" : "Red"} Leading
+                        {leadingPlayer === 1
+                            ? "Blue Leading"
+                            : leadingPlayer === 2
+                            ? "Red Leading"
+                            : "Tied"}
                     </div>
                 </div>
-            )}
+            }
         </div>
     );
 };
