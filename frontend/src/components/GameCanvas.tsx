@@ -349,7 +349,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
         if (
             game.state === "fighting" &&
             !isAnimating &&
-            animationGeneration < 10
+            animationGeneration < 10 &&
+            !shouldShowWinScreen
         ) {
             setIsAnimating(true);
             setAnimationGrid(JSON.parse(JSON.stringify(game.grid))); // Deep copy
